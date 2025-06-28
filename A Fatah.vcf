@@ -1,0 +1,8 @@
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iPhone OS 18.4.1//EN
+N:Fatah;A;;;
+FN:A Fatah
+item1.TEL;type=pref:+234 705 514 8808
+item1.X-ABLabel:Mobile
+END:VCARD

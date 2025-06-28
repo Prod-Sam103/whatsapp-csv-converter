@@ -1,0 +1,34 @@
+# Environment variables - TOP SECRET
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Test outputs
+*.csv
+tests/*.csv
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+*.tmp
+*.temp
+
+# Local test data
+local-test-data/
+*.vcf.backup
+
+# Redis dump (if using local Redis)
+dump.rdb

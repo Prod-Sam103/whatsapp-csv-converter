@@ -1,0 +1,10 @@
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iPhone OS 17.0//EN
+N:Smith;Jane;;;
+FN:Jane Smith
+item1.TEL;type=pref:+234 803 123 4567
+item1.X-ABLabel:Mobile
+item2.EMAIL:jane@example.com
+item2.X-ABLabel:Work
+END:VCARD
