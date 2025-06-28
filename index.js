@@ -223,8 +223,8 @@ async function sendCsvReply({ From, contacts, reply }) {
   }, FILE_TTL_S);
 
   const url = `${BASE_URL}/download/${fileId}`;
-  reply.message(
-    `${OK_EMOJI} Done – ${contacts.length} contacts converted.\n` +
+reply.message(
+  `${OK_EMOJI} *Conversion complete!* – ${contacts.length} contacts converted.\n` +
     `Download: ${url}\nPassword: ${password}\n(Link valid 2 h)`
   );
 }
@@ -236,11 +236,55 @@ function finish(res, twimlObj) {
 /* -------------------------------------------------------- HTTP – CSV DOWNLOAD */
 
 app.get('/download/:id', async (req, res) => {
-  const file = await sessionStore.getTempFile(req.params.id);
-  if (!file) return res.status(404).send('Link expired');
+/* -------- password-protected download */
+app.get('/download/:id', async (req, res) => {
+  const { id } = req.params;
+  const { p }  = req.query;            // password query-string ?p=123456
+  const file   = await sessionStore.getTempFile(id);
 
-  res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
-  res.type('text/csv').send(file.content);
+  if (!file) {
+    return res.status(404).send('<h1>❌ Link expired or file not found</h1>');
+  }
+
+  // no password or wrong password → show form
+  if (!p || p !== file.password) {
+    return res.send(`
+      <!DOCTYPE html>
+      <html><head>
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <title>Enter Password</title>
+        <style>
+          body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial;
+               display:flex;justify-content:center;align-items:center;
+               min-height:100vh;margin:0;background:#f5f5f5}
+          .box{background:#fff;padding:2rem;border-radius:10px;
+               box-shadow:0 2px 8px rgba(0,0,0,0.1);max-width:320px;width:90%}
+          input,button{width:100%;padding:12px;font-size:16px;margin-top:10px;
+                       border-radius:5px;border:2px solid #ddd;box-sizing:border-box}
+          button{background:#25d366;color:#fff;border:none}
+        </style>
+      </head><body>
+        <div class="box">
+          <h2>🔐 Enter 6-digit password</h2>
+          ${p ? '<p style="color:#d33">Incorrect code, try again.</p>' : ''}
+          <form>
+            <input type="text" name="p" maxlength="6" pattern="[0-9]{6}" required autofocus>
+            <button type="submit">Download CSV</button>
+          </form>
+          <p style="font-size:13px;color:#666;margin-top:10px">
+             The password was sent to you in WhatsApp.<br>
+             Link auto-expires in 2 hours.
+          </p>
+        </div>
+      </body></html>
+    `);
+  }
+
+  // correct password → stream CSV
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition',
+    `attachment; filename="${file.filename}"`);
+  res.send(file.content);
 });
 
 /* -------------------------------------------------------- START-UP */
