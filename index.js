@@ -4,7 +4,7 @@ const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
-// Import tactical modules
+// Import tactical modules - UPDATED PATHS
 const { parseVCF } = require('./src/vcf-parser');
 const { generateCSV } = require('./src/csv-generator');
 
