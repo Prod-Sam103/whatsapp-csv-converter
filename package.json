@@ -8,7 +8,12 @@
     "dev": "NODE_ENV=development node index.js",
     "test": "node test-parser.js"
   },
-  "keywords": ["whatsapp", "csv", "contacts", "converter"],
+  "keywords": [
+    "whatsapp",
+    "csv",
+    "contacts",
+    "converter"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -17,7 +22,8 @@
     "express": "^4.19.2",
     "redis": "^4.6.7",
     "twilio": "^5.2.0",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "xlsx": "^0.18.5"
   },
   "engines": {
     "node": ">=18.0.0"
