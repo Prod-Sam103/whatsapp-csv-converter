@@ -1,50 +1,42 @@
 /**
- * Simple WhatsApp VCF parser – strips emoji, normalises numbers
+ * VCF parser  – handles desktop/web quoted-printable & strips emoji
  */
-function stripEmoji(str = '') {
-  return str.replace(/\p{Extended_Pictographic}/gu, '').trim();
+function unqp(str){
+  if(!/=/.test(str)) return str;
+  return Buffer.from(str.replace(/=0D=0A|=0A/g,'')
+                        .replace(/=/g,''), 'hex').toString('utf8');
+}
+function deEmoj(text=''){return text.replace(/\p{Extended_Pictographic}/gu,'').trim();}
+
+function parseVCF(raw){
+  const out=[];
+  raw.replace(/\r\n/g,'\n').split(/BEGIN:VCARD/i).forEach(card=>{
+    if(!card.includes('END:VCARD')) return;
+    const c={name:'',mobile:'',email:''};
+    const L=card.split('\n').map(l=>l.trim()).filter(Boolean);
+
+    /* FN or N */
+    const fn=L.find(l=>/^FN[:;]/i.test(l));
+    if(fn) c.name = unqp(fn.replace(/^FN[:;]/i,''));
+    if(!c.name){
+      const n=L.find(l=>/^N:/i.test(l));
+      if(n){
+        const p=n.slice(2).split(';');
+        c.name=(p[1]||'')+' '+(p[0]||''); }
+    }
+    c.name=deEmoj(c.name);
+
+    /* TEL */
+    const tel=L.find(l=>/^TEL.*:/i.test(l)||/^item\d+\.TEL/i.test(l));
+    if(tel){
+      let num=tel.split(':').pop().replace(/[^\d+]/g,'');
+      if(/^0[789]\d{9}$/.test(num)) num='+234'+num.slice(1);
+      if(/^\d{10,}$/.test(num)&&!num.startsWith('+')) num='+'+num;
+      c.mobile=num;
+    }
+    if(c.name||c.mobile) out.push(c);
+  });
+  return out;
 }
 
-function parseVCF(raw) {
-  const contacts = [];
-  const cards = raw
-    .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-    .split(/BEGIN:VCARD/i).filter(Boolean);
-
-  for (const card of cards) {
-    if (!card.includes('END:VCARD')) continue;
-    const c = { name: '', mobile: '', email: '' };
-
-    const lines = card.split('\n').map(l => l.trim()).filter(Boolean);
-
-    /* name */
-    const n = lines.find(l => /^N:/i.test(l));
-    if (n) {
-      const p = n.slice(2).split(';');
-      c.name = `${p[1] || ''} ${p[0] || ''}`.trim();
-    }
-    if (!c.name) {
-      const fn = lines.find(l => /^FN:/i.test(l));
-      if (fn) c.name = fn.slice(3).trim();
-    }
-    c.name = stripEmoji(c.name);
-
-    /* phone */
-    const tel = lines.find(l => /^TEL.*:/i.test(l) || /^item\d+\.TEL/i.test(l));
-    if (tel) {
-      let num = tel.split(':').slice(1).join(':').replace(/[^\d+]/g, '');
-      if (/^0[789]\d{9}$/.test(num)) num = '+234' + num.slice(1); // NG fix
-      if (/^\d{10,}$/.test(num) && !num.startsWith('+')) num = '+' + num;
-      c.mobile = num;
-    }
-
-    /* email (optional) */
-    const em = lines.find(l => /^EMAIL/i.test(l) || /^item\d+\.EMAIL/i.test(l));
-    if (em) c.email = em.split(':').pop().trim();
-
-    if (c.name || c.mobile) contacts.push(c);
-  }
-  return contacts;
-}
-
-module.exports = { parseVCF };
+module.exports={parseVCF};
