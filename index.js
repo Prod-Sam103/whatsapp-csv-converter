@@ -1,7 +1,7 @@
 /**
- * WhatsApp XLSX Converter — v1.6
- * • XLSX attachment with .xlsx extension in URL (required by WhatsApp)
- * • multi-file intake ▸ duplicate resolver
+ * WhatsApp XLSX Converter — v1.6.1
+ * • .xlsx URL (WhatsApp-safe)
+ * • keeps running after Redis / other transient errors
  */
 
 const express  = require('express');
@@ -12,8 +12,8 @@ const { v4: uuid } = require('uuid');
 require('dotenv').config();
 
 console.log('ENV REDIS_URL =', process.env.REDIS_URL || 'undefined');
-process.on('uncaughtException', e => { console.error('UNCAUGHT', e); process.exit(1); });
-process.on('unhandledRejection', e => { console.error('UNHANDLED', e); process.exit(1); });
+process.on('uncaughtException',  e => console.error('UNCAUGHT',  e));   // ← no exit
+process.on('unhandledRejection', e => console.error('UNHANDLED', e));   // ← no exit
 
 const { parseVCF } = require('./src/vcf-parser');
 const sessionStore = require('./src/session-store');
@@ -22,7 +22,7 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || 'https://whatsapp-csv-converter-production.up.railway.app';
 
-const FILE_TTL = 900;               // seconds
+const FILE_TTL = 900;
 const DUP_TIMEOUT = 60_000;
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -30,7 +30,7 @@ app.use(express.urlencoded({ extended: false }));
 const OK='✅', WARN='⚠️', THINK='🤔';
 const twiml = () => new twilio.twiml.MessagingResponse();
 
-/* ───────── webhook ───────── */
+/* -------------- webhook -------------- */
 app.post('/webhook', async (req,res)=>{
   const {Body='',From,NumMedia=0}=req.body;
   const media=+NumMedia||0;
@@ -38,24 +38,24 @@ app.post('/webhook', async (req,res)=>{
 
   try{
     const dup=await sessionStore.getDupState(From);
-    if(dup){await dupReply({Body,From,rsp,dup});return done(res,rsp);}
+    if(dup){await dupReply({Body,From,rsp,dup});return respond(res,rsp);}
 
     if(media){
       const tot=await intake({req,From,media});
       rsp.message(`📊 I’ve stashed *${tot}* contacts so far.\n\n1️⃣ Crunch them now  |  2️⃣ Send more`);
-      return done(res,rsp);
+      return respond(res,rsp);
     }
 
     const k=Body.trim();
-    if(k==='2'){rsp.message('👍 Send the next card when ready.');return done(res,rsp);}
-    if(k==='1'){await convert({From,rsp});return done(res,rsp);}
+    if(k==='2'){rsp.message('👍 Send the next card when ready.');return respond(res,rsp);}
+    if(k==='1'){await convert({From,rsp});return respond(res,rsp);}
 
     rsp.message('👋 Send contact cards and I’ll cook up a spreadsheet for you!');
   }catch(e){console.error(e);rsp.message(`${WARN} Oops – something broke. Try again.`);}
-  done(res,rsp);
+  respond(res,rsp);
 });
 
-/* ───────── intake / convert ───────── */
+/* -------------- intake / convert -------------- */
 async function intake({req,From,media}){
   const pile=[];
   for(let i=0;i<media;i++){
@@ -90,7 +90,7 @@ async function dupReply({Body,From,rsp,dup}){
   await sendXLSX({From,list:dup.uniques.concat(dup.chosen),rsp});
 }
 
-/* ───────── helpers ───────── */
+/* -------------- helpers -------------- */
 async function fetchVCF(url){
   const {TWILIO_ACCOUNT_SID:sid,TWILIO_AUTH_TOKEN:tok}=process.env;
   return (await axios.get(url,{auth:{username:sid,password:tok},responseType:'text'})).data;
@@ -110,9 +110,9 @@ function promptDup({From,rsp}){
 }
 
 function buildWorkbook(list){
-  const header=['Name','Phone','Email','Passes'];
+  const hdr=['Name','Phone','Email','Passes'];
   const rows=list.map(c=>[c.name,c.mobile,c.email||'',c.passes||1]);
-  const ws=XLSX.utils.aoa_to_sheet([header,...rows]);
+  const ws=XLSX.utils.aoa_to_sheet([hdr,...rows]);
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Contacts');
   return XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
@@ -126,29 +126,25 @@ async function sendXLSX({From,list,rsp}){
 
   await sessionStore.setTempFile(id,{content:b64,filename,b64:true},FILE_TTL);
 
-  // URL ends in .xlsx so WhatsApp accepts it
-  const url=`${BASE_URL}/files/${id}.xlsx`;
+  const url=`${BASE_URL}/files/${id}.xlsx`;   // .xlsx extension
 
   console.log(`📎 Sent XLSX with ${list.length} entries to ${From}`);
   rsp.message(`${OK} *Conversion complete!* – sending ${list.length} contacts…`).media(url);
 }
 
-function done(res,t){res.type('text/xml').send(t.toString());}
+function respond(res,t){res.type('text/xml').send(t.toString());}
 
-/* ───────── file endpoints (with .xlsx ext) ───────── */
+/* -------------- file endpoints -------------- */
 app.get('/files/:id.xlsx',async(req,res)=>{
-  const id=req.params.id;
-  const f=await sessionStore.getTempFile(id);
+  const f=await sessionStore.getTempFile(req.params.id);
   if(!f)return res.sendStatus(404);
   const buf=Buffer.from(f.content,'base64');
   res.setHeader('Content-Type',XLSX_MIME);
   res.setHeader('Content-Disposition',`attachment; filename="${f.filename}"`);
   res.send(buf);
 });
-
 app.head('/files/:id.xlsx',async(req,res)=>{
-  const id=req.params.id;
-  const f=await sessionStore.getTempFile(id);
+  const f=await sessionStore.getTempFile(req.params.id);
   if(!f)return res.sendStatus(404);
   res.setHeader('Content-Type',XLSX_MIME);
   res.setHeader('Content-Disposition',`attachment; filename="${f.filename}"`);
@@ -156,5 +152,5 @@ app.head('/files/:id.xlsx',async(req,res)=>{
   res.sendStatus(200);
 });
 
-/* ───────── boot ───────── */
-app.listen(PORT,()=>console.log(`🚀 XLSX-bot @${PORT}`));
+/* -------------- boot -------------- */
+app.listen(PORT,()=>console.log(`🚀 XLSX-bot listening on ${PORT}`));
