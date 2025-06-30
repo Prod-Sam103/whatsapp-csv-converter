@@ -1,8 +1,9 @@
 /**
- * WhatsApp CSV Converter – v1-sandbox
- * Multi-file intake ▸ confirmation ▸ duplicate resolver ▸ CSV generator
- * Mode controlled by WHATSAPP_MODE (sandbox | live)
+ * WhatsApp CSV Converter – Set C UX
+ * • multi-file intake ▸ confirmation ▸ duplicate resolver
+ * • password-protected download-link flow (sandbox-friendly)
  */
+
 const express  = require('express');
 const twilio   = require('twilio');
 const axios    = require('axios');
@@ -15,129 +16,117 @@ const sessionStore    = require('./src/session-store');
 
 const app        = express();
 const PORT       = process.env.PORT || 3000;
-const BASE_URL   = process.env.BASE_URL || `http://localhost:${PORT}`;
-const MODE_LIVE  = process.env.WHATSAPP_MODE === 'live';   // sandbox by default
-const FILE_TTL_S = 7200;                                   // 2 h
-const DUP_TIMEOUT_MS = 60_000;                             // 60 s
+const BASE_URL   = process.env.BASE_URL || `https://whatsapp-csv-converter-production.up.railway.app`;
+const FILE_TTL_S = 7200;        // 2 h for download link
+const DUP_TIMEOUT_MS = 60_000;
 
 app.use(express.urlencoded({ extended: false }));
 
-/* ---------- helpers ------------------------------------------------------- */
-function twiml() { return new twilio.twiml.MessagingResponse(); }
-const OK_EMOJI  = '\u2705';  // ✅
-const ERR_EMOJI = '\u274C';  // ❌
+const twiml = () => new twilio.twiml.MessagingResponse();
 
-/* ---------- webhook ------------------------------------------------------- */
+/* ---------------- webhook ---------------- */
 app.post('/webhook', async (req, res) => {
   const { Body = '', From, NumMedia = 0 } = req.body;
-  const mediaCount = parseInt(NumMedia, 10) || 0;
-  const reply = twiml();
+  const mediaCount = +NumMedia || 0;
+  const rsp = twiml();
 
   try {
-    /* 1 ▸ waiting for duplicate choice? */
-    const dupState = await sessionStore.getDupState(From);
-    if (dupState) {
-      await handleDuplicateReply({ Body, From, reply, dupState });
-      return finish(res, reply);
+    /* 1. duplicate-resolver state */
+    const dup = await sessionStore.getDupState(From);
+    if (dup) {
+      await handleDupReply({ Body, From, rsp, dup });
+      return send(rsp, res);
     }
 
-    /* 2 ▸ media upload(s) */
-    if (mediaCount > 0) {
+    /* 2. media intake */
+    if (mediaCount) {
       const total = await handleMediaBatch({ req, From, mediaCount });
-      reply.message(
-        `Collected ${total} contacts so far.\n` +
-        `1 – Convert to CSV\n2 – Add more contacts`
+      rsp.message(
+        `💾 *${total}* saved so far.\n` +
+        `Tap 1️⃣ to export • 2️⃣ to keep loading`
       );
-      return finish(res, reply);
+      return send(rsp, res);
     }
 
-    /* 3 ▸ confirmation keys */
-    const clean = Body.trim();
-    if (clean === '2') {
-      reply.message('Sure – send the next contact file.');
-      return finish(res, reply);
+    /* 3. key commands */
+    const key = Body.trim();
+    if (key === '2') {
+      rsp.message('👌 Fire away—waiting…');
+      return send(rsp, res);
     }
-    if (clean === '1') {
-      await beginConversion({ From, reply });
-      return finish(res, reply);
+    if (key === '1') {
+      await beginConversion({ From, rsp });
+      return send(rsp, res);
     }
 
-    /* 4 ▸ fallback / help */
-    reply.message(
-      'Hi! Send me WhatsApp contact cards and I’ll turn them into a ' +
-      'password-protected CSV.\nType *help* for more.'
-    );
-
+    /* 4. idle / help */
+    rsp.message('📨 Drop your contact cards—let’s bulk-load them! 🚀');
   } catch (err) {
     console.error(err);
-    reply.message(`${ERR_EMOJI} Unexpected error – please try again later.`);
+    rsp.message('🛑 Glitch detected. Let’s try that again.');
   }
-
-  finish(res, reply);
+  send(rsp, res);
 });
 
-/* ---------- handlers ------------------------------------------------------ */
+/* ---------------- handlers ---------------- */
 async function handleMediaBatch({ req, From, mediaCount }) {
   const contacts = [];
-  for (let i = 0; i < mediaCount; i += 1) {
-    const mediaUrl = req.body[`MediaUrl${i}`];
-    if (!mediaUrl) continue;
-    const vcf = await downloadVCF(mediaUrl);
-    contacts.push(...parseVCF(vcf));
+  for (let i = 0; i < mediaCount; i++) {
+    const url = req.body[`MediaUrl${i}`];
+    if (!url) continue;
+    contacts.push(...parseVCF(await fetchVCF(url)));
   }
   return sessionStore.appendContacts(From, contacts);
 }
 
-async function beginConversion({ From, reply }) {
+async function beginConversion({ From, rsp }) {
   const staged = await sessionStore.popContacts(From);
   if (!staged.length) {
-    reply.message('No contacts staged – send some vCards first.');
+    rsp.message('🕳️ Nothing here yet. Send a card to kick off.');
     return;
   }
 
   const { uniques, duplicates } = splitDuplicates(staged);
 
   if (duplicates.length) {
-    await sessionStore.setDupState(From, {
-      uniques, duplicates, cursor: 0, selected: []
-    }, DUP_TIMEOUT_MS / 1000);
-    promptNextDuplicate({ From, reply });
+    await sessionStore.setDupState(
+      From,
+      { uniques, duplicates, cursor: 0, chosen: [] },
+      DUP_TIMEOUT_MS / 1000
+    );
+    promptNextDup({ From, rsp });
     return;
   }
 
-  await deliverCsv({ From, contacts: uniques, reply });
+  await sendCsv({ From, list: uniques, rsp });
 }
 
-async function handleDuplicateReply({ Body, From, reply, dupState }) {
-  const choice = Body.trim();
-  if (!/^[12]$/.test(choice)) {
-    reply.message('Please reply 1 or 2.');
+async function handleDupReply({ Body, From, rsp, dup }) {
+  if (!/^[12]$/.test(Body.trim())) {
+    rsp.message('⛔ Just 1 or 2, please.');
     return;
   }
 
-  const idx   = dupState.cursor;
-  const pair  = dupState.duplicates[idx];
-  dupState.selected.push(pair[parseInt(choice) - 1]);
-  dupState.cursor++;
+  dup.chosen.push(dup.duplicates[dup.cursor][Body.trim() === '1' ? 0 : 1]);
+  dup.cursor++;
 
-  if (dupState.cursor < dupState.duplicates.length) {
-    await sessionStore.setDupState(From, dupState, DUP_TIMEOUT_MS / 1000);
-    promptNextDuplicate({ From, reply });
+  if (dup.cursor < dup.duplicates.length) {
+    await sessionStore.setDupState(From, dup, DUP_TIMEOUT_MS / 1000);
+    promptNextDup({ From, rsp });
     return;
   }
 
   await sessionStore.clearDupState(From);
-  const finalList = dupState.uniques.concat(dupState.selected);
-  await deliverCsv({ From, contacts: finalList, reply });
+  await sendCsv({ From, list: dup.uniques.concat(dup.chosen), rsp });
 }
 
-/* ---------- helpers ------------------------------------------------------- */
-async function downloadVCF(url) {
-  const { TWILIO_ACCOUNT_SID: sid, TWILIO_AUTH_TOKEN: token } = process.env;
-  const resp = await axios.get(url, {
-    auth: { username: sid, password: token }, responseType: 'text'
+/* ---------------- utilities ---------------- */
+async function fetchVCF(url) {
+  const { TWILIO_ACCOUNT_SID: sid, TWILIO_AUTH_TOKEN: tok } = process.env;
+  const r = await axios.get(url, {
+    auth: { username: sid, password: tok }, responseType: 'text'
   });
-  return resp.data;
+  return r.data;
 }
 
 function splitDuplicates(list) {
@@ -148,80 +137,59 @@ function splitDuplicates(list) {
     map.get(c.mobile).push(c);
   });
   const uniques = [], duplicates = [];
-  map.forEach(arr => arr.length === 1 ? uniques.push(arr[0]) : duplicates.push(arr));
+  map.forEach(arr => (arr.length === 1 ? uniques : duplicates)
+    .push(arr.length === 1 ? arr[0] : arr));
   return { uniques, duplicates };
 }
 
-function promptNextDuplicate({ From, reply }) {
+function promptNextDup({ From, rsp }) {
   sessionStore.getDupState(From).then(state => {
-    const grp = state.duplicates[state.cursor];
-    const phone = grp[0].mobile;
-    reply.message(
-      `Duplicate found for ${phone}\n` +
-      `1) ${grp[0].name || 'Unnamed'}\n` +
-      `2) ${grp[1].name || 'Unnamed'}\n` +
-      `Reply 1 or 2 to keep that version`
+    const g = state.duplicates[state.cursor];
+    rsp.message(
+      `🤹‍♂️ Duplicate spotted for ${g[0].mobile}:\n` +
+      `1️⃣ ${g[0].name || 'No Name'}\n` +
+      `2️⃣ ${g[1].name || 'No Name'}`
     );
   });
 }
 
-async function deliverCsv({ From, contacts, reply }) {
-  const csv      = generateCSV(contacts);
-  const fileId   = uuid();
-  const password = Math.floor(100000 + Math.random() * 900000).toString();
+async function sendCsv({ From, list, rsp }) {
+  const csv  = generateCSV(list);
+  const id   = uuid();
+  const pw   = Math.floor(100000 + Math.random() * 900000).toString();
 
-  await sessionStore.setTempFile(fileId, {
+  await sessionStore.setTempFile(id, {
     content: csv,
     filename: `contacts_${Date.now()}.csv`,
-    password,
+    password: pw,
     owner: From
   }, FILE_TTL_S);
 
-  const url = `${BASE_URL}/download/${fileId}`;
-  reply.message(
-    `${OK_EMOJI} *Conversion complete!* – ${contacts.length} contacts converted.\n` +
-    `Download: ${url}\nPassword: ${password}\n(Link valid 2 h)`
+  const link = `${BASE_URL}/download/${id}`;
+  rsp.message(
+    `🎉 Done! *${list.length}* contacts ready.\n` +
+    `🔗 ${link} (PW ${pw}, 2 hrs)`
   );
 }
 
-function finish(res, twimlObj) {
-  res.type('text/xml').send(twimlObj.toString());
-}
+function send(rsp, res) { res.type('text/xml').send(rsp.toString()); }
 
-/* ---------- password-protected download route ----------------------------- */
+/* ---------------- download route ---------------- */
 app.get('/download/:id', async (req, res) => {
-  const { id } = req.params;
-  const { p }  = req.query;       // ?p=123456
-  const file   = await sessionStore.getTempFile(id);
+  const file = await sessionStore.getTempFile(req.params.id);
+  const p    = req.query.p;
 
-  if (!file) return res.status(404).send('❌ Link expired or file not found');
+  if (!file) return res.status(404).send('Link expired.');
 
-  if (!p || p !== file.password) {
-    return res.send(`<!DOCTYPE html><html><head>
-      <meta name="viewport" content="width=device-width,initial-scale=1">
-      <title>Enter Password</title>
-      <style>
-        body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial;
-             display:flex;justify-content:center;align-items:center;
-             min-height:100vh;margin:0;background:#f5f5f5}
-        .box{background:#fff;padding:2rem;border-radius:10px;
-             box-shadow:0 2px 8px rgba(0,0,0,.1);max-width:320px;width:90%}
-        input,button{width:100%;padding:12px;font-size:16px;margin-top:10px;
-                     border-radius:5px;border:2px solid #ddd;box-sizing:border-box}
-        button{background:#25d366;color:#fff;border:none}
-      </style></head><body>
-      <div class="box">
-        <h2>🔐 Enter 6-digit password</h2>
-        ${p ? '<p style="color:#d33">Incorrect code, try again.</p>' : ''}
-        <form>
-          <input type="text" name="p" maxlength="6" pattern="[0-9]{6}" required autofocus>
-          <button type="submit">Download CSV</button>
-        </form>
-        <p style="font-size:13px;color:#666;margin-top:10px">
-          The password was sent to you in WhatsApp.<br>
-          Link auto-expires in 2 hours.
-        </p>
-      </div></body></html>`);
+  if (p !== file.password) {
+    return res.status(401).send(`
+      <h2>🔐 Enter 6-digit password</h2>
+      <form method="GET">
+        <input name="p" maxlength="6" pattern="[0-9]{6}" required autofocus>
+        <button type="submit">Download CSV</button>
+      </form>
+      ${p ? '<p style="color:red">Incorrect password</p>' : ''}
+    `);
   }
 
   res.setHeader('Content-Type', 'text/csv');
@@ -230,7 +198,5 @@ app.get('/download/:id', async (req, res) => {
   res.send(file.content);
 });
 
-/* ---------- start-up ------------------------------------------------------ */
-app.listen(PORT, () => {
-  console.log(`🚀 WhatsApp CSV Converter listening on ${PORT} (${MODE_LIVE ? 'live' : 'sandbox'})`);
-});
+/* ---------------- boot ---------------- */
+app.listen(PORT, () => console.log(`🚀 CSV-bot running on ${PORT}`));
