@@ -44,7 +44,7 @@ app.post('/webhook', async (req, res) => {
     if (mediaCount) {
       const total = await handleMediaBatch({ req, From, mediaCount });
       rsp.message(
-        `💾 *${total}* saved so far.\n` +
+        `💾 *${total}* saved so far.\n\n` +       // ← extra blank line here
         `Tap 1️⃣ to export • 2️⃣ to keep loading`
       );
       return sendXML(res, rsp);
