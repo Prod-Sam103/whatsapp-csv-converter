@@ -142,56 +142,69 @@ app.post('/webhook', async (req, res) => {
         if (NumMedia > 0 && MediaUrl0) {
             console.log('📎 Contact package detected:', MediaUrl0);
             
-            // Download VCF file
+            // Get existing batch or create new one
+            let batch = await storage.get(`batch:${From}`) || { contacts: [], count: 0 };
+            
+            // Download and parse new VCF file
             const vcfContent = await downloadMedia(MediaUrl0, req);
+            const newContacts = parseVCF(vcfContent);
             
-            // Parse contacts
-            const contacts = parseVCF(vcfContent);
-            
-            if (contacts.length === 0) {
+            if (newContacts.length === 0) {
                 twiml.message(`❌ No contacts found in the file.\n\nPlease ensure you're sharing a valid contact file.`);
                 res.type('text/xml');
                 res.send(twiml.toString());
                 return;
             }
             
-            // Generate CSV
-            const csv = generateCSV(contacts);
+            // Add to batch
+            batch.contacts.push(...newContacts);
+            batch.count = batch.contacts.length;
+            batch.lastUpdated = Date.now();
             
-            // Create secure file
+            // Save batch (expires in 10 minutes)
+            await storage.set(`batch:${From}`, batch, 600);
+            
+            // Send confirmation message
+            twiml.message(`💾 ${batch.count} saved so far.
+
+Tap 1️⃣ to export • 2️⃣ to keep adding`);
+            
+        } else if (Body === '1️⃣' || Body === '1') {
+            // Export current batch
+            const batch = await storage.get(`batch:${From}`);
+            
+            if (!batch || batch.contacts.length === 0) {
+                twiml.message(`❌ No contacts to export.\n\nSend some contacts first!`);
+                res.type('text/xml');
+                res.send(twiml.toString());
+                return;
+            }
+            
+            // Generate CSV from batch
+            const csv = generateCSV(batch.contacts);
+            
+            // Create secure file (no password needed)
             const fileId = uuidv4();
-            const password = Math.floor(100000 + Math.random() * 900000).toString();
             
             await storage.set(`file:${fileId}`, {
                 content: csv,
                 filename: `contacts_${Date.now()}.csv`,
-                password: password,
                 from: From,
                 created: Date.now(),
-                contactCount: contacts.length
+                contactCount: batch.contacts.length
             });
             
-            // Create combined URL parameter for template (fileId with password)
-            const urlParam = `${fileId}?p=${password}`;
-            const downloadUrl = `${BASE_URL}/download/${fileId}?p=${password}`;
+            const downloadUrl = `${BASE_URL}/download/${fileId}`;
             
-            // TEMPORARILY DISABLE TEMPLATE - Use enhanced fallback
-            console.log('📱 Using fallback message (template disabled)');
-            twiml.message(`✅ *CSV Ready!*\n\n📊 Processed: ${contacts.length} contacts\n📎 Download: ${downloadUrl}\n🔑 Password: ${password}\n⏰ Expires: 2 hours\n\n💡 _Tap the link to download your CSV file_`);
+            // Send download message
+            twiml.message(`✅ *CSV Ready!*\n\n📊 Processed: ${batch.contacts.length} contacts\n📎 Download: ${downloadUrl}\n⏰ Expires: 2 hours\n\n💡 _Tap the link to download your CSV file_`);
             
-            // Send template message with download button (DISABLED)
-            // if (TEMPLATE_SID) {
-            //     try {
-            //         await sendTemplateMessage(From, contacts.length, urlParam);
-            //     } catch (templateError) {
-            //         console.error('❌ Template failed, using fallback:', templateError);
-            //         twiml.message(`✅ *CSV Ready!*\n\n📊 ${contacts.length} contacts processed\n📎 Download: ${downloadUrl}\n🔑 Password: ${password}\n⏰ Expires: 2 hours`);
-            //     }
-            // } else {
-                // Fallback to regular message if template not configured
-                // Fallback to regular message if template not configured
-                // twiml.message(`✅ **Operation Complete!**\n\n📊 Processed: ${contacts.length} contacts\n📎 File: contacts.csv\n🔗 Download: ${downloadUrl}\n🔑 Password: ${password}\n⏰ Expires: 2 hours`);
-            // }
+            // Clear batch after export
+            await storage.del(`batch:${From}`);
+            
+        } else if (Body === '2️⃣' || Body === '2') {
+            // Continue adding - just acknowledge
+            twiml.message(`📨 Drop your contact cards—let's bulk-load them! 🚀`);
             
         } else if (Body.toLowerCase() === 'help') {
             twiml.message(`🎖️ **WhatsApp CSV Converter**\n\n📋 **HOW TO USE:**\n1. Tap attachment (📎)\n2. Select "Contact" \n3. Choose contacts (up to 250)\n4. Send to this number\n5. Get download button\n\n⚡ **FEATURES:**\n- Instant CSV conversion\n- Nigerian numbers auto-formatted\n- Secure downloads\n- Password protection\n\n_Send contacts to get started..._`);
@@ -201,7 +214,16 @@ app.post('/webhook', async (req, res) => {
             
         } else if (Body.toLowerCase() === 'status') {
             const fileCount = await getActiveFileCount();
-            twiml.message(`📊 **Operational Status**\n\n🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}\n📁 Active files: ${fileCount}\n⏱️ Uptime: ${Math.floor(process.uptime() / 60)} minutes\n🌐 Base URL: ${BASE_URL}\n💾 Storage: ${redisClient ? 'Redis Cloud' : 'In-Memory'}\n📋 Template: ${TEMPLATE_SID ? 'READY' : 'NOT CONFIGURED'}\n\n_All systems nominal_`);
+            twiml.message(`✅ *Systems Check Complete*
+
+🟢 Bot: OPERATIONAL
+🟢 Parser: ARMED
+🟢 CSV Generator: READY
+🟢 Storage: ${redisClient ? 'REDIS' : 'MEMORY'}
+🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}
+🟢 Template: ${TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}
+
+Ready to receive contact packages!`);
             
         } else {
             // Any other message - prompt for contacts
@@ -303,7 +325,7 @@ app.get('/download/:fileId', async (req, res) => {
     console.log(`📥 File downloaded: ${fileId} (${fileData.contactCount || 0} contacts)`);
 });
 
-// Health check endpoint (unchanged)
+// Health check endpoint
 app.get('/', async (req, res) => {
     const fileCount = await getActiveFileCount();
     
@@ -380,8 +402,9 @@ app.get('/', async (req, res) => {
                 <ol>
                     <li>Send a WhatsApp message to +16466030424</li>
                     <li>Share contacts using the attachment button</li>
-                    <li>Receive a message with download button</li>
-                    <li>Click button to download your CSV file</li>
+                    <li>Accumulate contacts in batches</li>
+                    <li>Tap 1️⃣ to export or 2️⃣ to keep adding</li>
+                    <li>Download your CSV file</li>
                 </ol>
                 
                 <p style="margin-top: 2rem; color: #666; text-align: center;">
@@ -405,7 +428,7 @@ app.use((err, req, res, next) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('🚀 OPERATION: TEMPLATE STORM - SYSTEMS ONLINE');
+    console.log('🚀 OPERATION: BATCH STORM - SYSTEMS ONLINE');
     console.log(`📡 Listening on PORT: ${PORT}`);
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected' : 'In-Memory Mode'}`);
