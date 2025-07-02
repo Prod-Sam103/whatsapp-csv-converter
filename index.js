@@ -405,19 +405,25 @@ _Ready to receive contact packages!_`);
             // Enhanced welcome message
             twiml.message(`👋 **Welcome to Contact Converter!**
 
-📨 Drop your contact files—let's bulk-load them! 🚀
+Drop your contact files here for lightning-fast bulk processing! 🚀
 
-📁 **Supported Formats:**
-📇 VCF (your contact via your phone book) 
-• 📊 CSV 
-• 📗 Excel 
-• 📄 PDF 
-• 📝 Text
+📂 Supported Formats:
 
-💡 **Send multiple files at once for faster processing**
+   📇 VCF (phone contacts)
 
-**Commands:**
-• Type *help* for detailed instructions`);
+   📊 CSV
+
+   📗 Excel
+
+   📄 PDF
+
+   📝 Text
+
+⚡️ Pro-Tip:
+Send multiple contacts at once for extra speed! 💨
+
+❓ Need Help?
+Type help.`);
         }
         
     } catch (error) {
