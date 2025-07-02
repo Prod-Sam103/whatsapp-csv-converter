@@ -4,9 +4,10 @@ const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
-// Import tactical modules - UPDATED PATHS
+// Import tactical modules
 const { parseVCF } = require('./src/vcf-parser');
 const { generateCSV } = require('./src/csv-generator');
+const { parseContactFile, getSupportedFormats } = require('./src/csv-excel-parser');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -15,6 +16,12 @@ app.use(express.urlencoded({ extended: false }));
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 const FILE_EXPIRY = 2 * 60 * 60 * 1000; // 2 hours
+
+// TESTING RESTRICTION - Only your number
+const AUTHORIZED_NUMBERS = ['+2348121364213']; // Your personal number
+
+// Template Configuration
+const TEMPLATE_SID = process.env.TEMPLATE_SID;
 
 // Storage (will be replaced with Redis in production)
 let fileStorage = {};
@@ -72,7 +79,59 @@ const storage = {
     }
 };
 
-// Updated Twilio webhook with multi-file support
+// Check if number is authorized for testing
+function isAuthorizedNumber(phoneNumber) {
+    const cleanNumber = phoneNumber.replace('whatsapp:', '');
+    return AUTHORIZED_NUMBERS.includes(cleanNumber);
+}
+
+// Parse contact media using your existing universal parser
+async function parseContactMedia(mediaUrl, req) {
+    try {
+        const accountSid = process.env.TWILIO_ACCOUNT_SID;
+        const authToken = process.env.TWILIO_AUTH_TOKEN;
+        
+        const response = await axios.get(mediaUrl, {
+            auth: {
+                username: accountSid,
+                password: authToken
+            },
+            responseType: 'arraybuffer'
+        });
+        
+        // Use your existing universal parser
+        return await parseContactFile(response.data);
+    } catch (error) {
+        console.error('Media download/parse error:', error);
+        throw error;
+    }
+}
+
+// Send template message function (stub - implement with your template)
+async function sendTemplateMessage(to, contactCount, fileId) {
+    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    
+    if (!TEMPLATE_SID) {
+        throw new Error('Template not configured');
+    }
+    
+    const downloadUrl = `${BASE_URL}/download/${fileId}`;
+    
+    await client.messages.create({
+        from: process.env.TWILIO_PHONE_NUMBER,
+        to: to,
+        messagingServiceSid: TEMPLATE_SID,
+        body: `✅ **Operation Complete!**
+
+📊 Processed: ${contactCount} contacts
+📎 Format: CSV ready for download
+⏰ Expires: 2 hours
+
+🔗 Download: ${downloadUrl}`
+    });
+}
+
+// Enhanced Twilio webhook with MULTI-FILE support
 app.post('/webhook', async (req, res) => {
     const { Body, From, NumMedia } = req.body;
     
@@ -84,14 +143,25 @@ app.post('/webhook', async (req, res) => {
     const twiml = new twilio.twiml.MessagingResponse();
     
     try {
-        // MULTIPLE CONTACT PACKAGES DETECTED
+        // TESTING RESTRICTION CHECK
+        if (!isAuthorizedNumber(From)) {
+            console.log(`🚫 Unauthorized number: ${From}`);
+            res.type('text/xml');
+            res.send(twiml.toString());
+            return;
+        }
+        
+        // MULTIPLE CONTACT FILES DETECTED - ENHANCED VERSION
         if (NumMedia > 0) {
-            console.log(`📎 ${NumMedia} contact package(s) detected`);
+            console.log(`📎 ${NumMedia} contact file(s) detected`);
             
-            let allContacts = [];
+            // Get existing batch or create new one
+            let batch = await storage.get(`batch:${From}`) || { contacts: [], count: 0 };
+            let totalNewContacts = 0;
             let processedFiles = 0;
+            let failedFiles = 0;
             
-            // Process ALL media attachments, not just MediaUrl0
+            // Process ALL attachments, not just MediaUrl0
             for (let i = 0; i < parseInt(NumMedia); i++) {
                 const mediaUrl = req.body[`MediaUrl${i}`];
                 const mediaType = req.body[`MediaContentType${i}`];
@@ -100,199 +170,175 @@ app.post('/webhook', async (req, res) => {
                     try {
                         console.log(`📎 Processing file ${i + 1}/${NumMedia}: ${mediaType}`);
                         
-                        if (!IS_PRODUCTION || !process.env.TWILIO_ACCOUNT_SID) {
-                            // Demo mode - add demo contacts for each file
-                            const demoContactsForFile = [
-                                { name: `Demo ${i + 1}-A`, mobile: `+234700000${i}01`, email: `demo${i + 1}a@example.com`, passes: 1 },
-                                { name: `Demo ${i + 1}-B`, mobile: `+234700000${i}02`, email: `demo${i + 1}b@example.com`, passes: 1 }
-                            ];
-                            allContacts = allContacts.concat(demoContactsForFile);
+                        // Parse using your universal parser
+                        const newContacts = await parseContactMedia(mediaUrl, req);
+                        console.log(`🔍 File ${i + 1} parsed: ${newContacts.length} contacts`);
+                        
+                        if (newContacts.length > 0) {
+                            // Add to batch
+                            batch.contacts.push(...newContacts);
+                            totalNewContacts += newContacts.length;
                             processedFiles++;
                         } else {
-                            // Production mode - use your existing parsing logic
-                            const fileContent = await downloadMedia(mediaUrl, req);
-                            const contacts = parseVCF(fileContent); // Your existing parser
-                            
-                            if (contacts && contacts.length > 0) {
-                                allContacts = allContacts.concat(contacts);
-                                processedFiles++;
-                                console.log(`✅ File ${i + 1} processed: ${contacts.length} contacts`);
-                            } else {
-                                console.log(`⚠️ File ${i + 1} contained no valid contacts`);
-                            }
+                            console.log(`⚠️ File ${i + 1} contained no valid contacts`);
+                            failedFiles++;
                         }
-                    } catch (fileError) {
-                        console.error(`❌ Error processing file ${i + 1}:`, fileError);
-                        // Continue processing other files
+                        
+                    } catch (parseError) {
+                        console.error(`❌ Error processing file ${i + 1}:`, parseError);
+                        failedFiles++;
                     }
                 }
             }
             
-            if (allContacts.length === 0) {
-                twiml.message(`❌ **Processing Failed**
-
-No valid contacts found in ${NumMedia} file(s).
-
-Please ensure you're sharing valid contact files.
-
-Type *help* for instructions.`);
-                
+            if (totalNewContacts === 0) {
+                twiml.message(`❌ No contacts found in ${NumMedia} file(s).\n\n${failedFiles > 0 ? `${failedFiles} files failed to process.\n\n` : ''}Supported formats: VCF, CSV, Excel, PDF, Text\nRequired: Name or Phone number`);
                 res.type('text/xml');
                 res.send(twiml.toString());
                 return;
             }
             
-            // Generate CSV using your existing function
-            const csv = generateCSV(allContacts);
+            // Update batch totals
+            batch.count = batch.contacts.length;
+            batch.lastUpdated = Date.now();
             
-            // Create secure file
+            // Save batch (expires in 10 minutes)
+            await storage.set(`batch:${From}`, batch, 600);
+            
+            // Enhanced confirmation message
+            let statusMessage = `💾 ${batch.count} saved so far.`;
+            
+            if (processedFiles > 0) {
+                statusMessage += `\n\n✅ Processed ${processedFiles} file(s): +${totalNewContacts} contacts`;
+            }
+            
+            if (failedFiles > 0) {
+                statusMessage += `\n⚠️ ${failedFiles} file(s) failed to process`;
+            }
+            
+            statusMessage += `\n\nTap 1️⃣ to export • 2️⃣ to keep adding`;
+            
+            twiml.message(statusMessage);
+            
+        } else if (Body === '1️⃣' || Body === '1') {
+            // Export current batch
+            const batch = await storage.get(`batch:${From}`);
+            
+            if (!batch || batch.contacts.length === 0) {
+                twiml.message(`❌ No contacts to export.\n\nSend some contact files first!`);
+                res.type('text/xml');
+                res.send(twiml.toString());
+                return;
+            }
+            
+            // Generate CSV from batch
+            const csv = generateCSV(batch.contacts);
+            
+            // Create secure file (no password needed)
             const fileId = uuidv4();
-            const password = Math.floor(100000 + Math.random() * 900000).toString();
             
             await storage.set(`file:${fileId}`, {
                 content: csv,
-                filename: `contacts_${Date.now()}.csv`,
-                password: password,
+                filename: `sugar_contacts_${Date.now()}.csv`,
                 from: From,
                 created: Date.now(),
-                contactCount: allContacts.length,
-                filesProcessed: processedFiles
+                contactCount: batch.contacts.length
             });
             
             const downloadUrl = `${BASE_URL}/download/${fileId}`;
             
-            // Preview first 3 contacts
-            const preview = allContacts.slice(0, 3).map(c => 
-                `• ${c.name} - ${c.mobile}`
-            ).join('\n');
-            
-            // Template-style response like your second screenshot
-            twiml.message(`✅ **Operation Complete!**
+            // Try template first, then fallback
+            try {
+                console.log('🚀 Sending template message...');
+                await sendTemplateMessage(From, batch.contacts.length, fileId);
+                console.log('✅ Template message sent successfully!');
+            } catch (templateError) {
+                console.error('❌ Template failed, using fallback:', templateError);
+                twiml.message(`✅ **Operation Complete!**
 
-📊 Processed: ${allContacts.length} contacts from ${processedFiles} file(s)
+📊 Processed: ${batch.contacts.length} contacts
 📎 Format: CSV ready for download
-🔑 Password: ${password}
 ⏰ Expires: 2 hours
 
-**Preview:**
-${preview}
-${allContacts.length > 3 ? `\n... and ${allContacts.length - 3} more` : ''}
+🔗 Download: ${downloadUrl}
 
-🔗 Download: ${downloadUrl}`);
+💡 _Tap the link to download your CSV file_`);
+            }
+            
+            // Clear batch after export
+            await storage.del(`batch:${From}`);
+            
+        } else if (Body === '2️⃣' || Body === '2') {
+            // Continue adding - just acknowledge
+            twiml.message(`📨 Drop your contact files—let's bulk-load them! 🚀\n\n📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text supported\n\n💡 _Send multiple files at once for faster processing_`);
             
         } else if (Body.toLowerCase() === 'help') {
-            sendHelpMessage(twiml);
+            twiml.message(`🎖️ **WhatsApp CSV Converter V2**
+
+📋 **HOW TO USE:**
+1. Send contact files (up to 5 at once)
+2. Tap 1️⃣ to export or 2️⃣ to add more
+3. Download your CSV file
+
+📁 **SUPPORTED FORMATS:**
+📇 VCF (Contact cards)
+📊 CSV (Comma-separated)
+📗 Excel (.xlsx, .xls)
+📄 PDF (Text extraction)
+📝 Text (Pattern matching)
+
+⚡ **NEW FEATURES:**
+✅ Multi-file processing
+✅ Batch collection system
+✅ Universal format support
+✅ Smart text extraction
+
+💡 **TIPS:**
+• Send multiple files together
+• Works with iPhone & Android exports
+• PDF contact lists supported
+• No file size limits
+
+_Standing by for your contact packages..._`);
             
         } else if (Body.toLowerCase() === 'test') {
             twiml.message(`✅ **Systems Check Complete**
 
 🟢 Bot: OPERATIONAL
-🟢 Multi-file Parser: ARMED  
-🟢 CSV Generator: READY
+🟢 Multi-file Parser: ARMED
+🟢 Universal Parser: READY
+🟢 Batch System: ACTIVE
 🟢 Storage: ${redisClient ? 'REDIS' : 'MEMORY'}
 🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}
 
+**Supported Formats:**
+📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text
+
 _Ready to receive contact packages!_`);
             
-        } else if (Body.toLowerCase() === 'status') {
-            const fileCount = await getActiveFileCount();
-            twiml.message(`📊 **Operational Status**
-
-🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}
-📁 Active files: ${fileCount}
-⏱️ Uptime: ${Math.floor(process.uptime() / 60)} minutes
-🌐 Base URL: ${BASE_URL}
-💾 Storage: ${redisClient ? 'Redis Cloud' : 'In-Memory'}
-
-_All systems nominal_`);
-            
         } else {
-            twiml.message(`👋 **Welcome to Contact Converter!**
+            // Any other message - enhanced prompt
+            twiml.message(`👋 **Welcome to Contact Converter V2!**
 
-Share contact files for instant CSV conversion.
+📨 Drop your contact files—let's bulk-load them! 🚀
 
-Type *help* for detailed instructions.
-Type *test* for system status.`);
+📁 **Supported Formats:**
+📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text
+
+💡 **Send multiple files at once for faster processing**
+
+Type 'help' for detailed instructions
+Type 'test' for system status`);
         }
         
     } catch (error) {
         console.error('❌ Operation failed:', error);
-        twiml.message(`❌ **System Error**
-
-Processing failed: ${error.message}
-
-Please try again or contact support.`);
+        twiml.message(`❌ Operation failed: ${error.message}\n\nPlease try again or contact support.`);
     }
     
     res.type('text/xml');
     res.send(twiml.toString());
 });
-
-// Download media from Twilio
-async function downloadMedia(mediaUrl, req) {
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    
-    const response = await axios.get(mediaUrl, {
-        auth: {
-            username: accountSid,
-            password: authToken
-        },
-        responseType: 'text'
-    });
-    
-    return response.data;
-}
-
-// Send help message
-function sendHelpMessage(twiml) {
-    twiml.message(`🎖️ **WhatsApp CSV Converter**
-
-📋 **COMMANDS:**
-- *help* - Show instructions
-- *test* - System check
-- *status* - Service status
-
-📎 **HOW TO USE:**
-1. Tap attachment (📎)
-2. Select "Contact" 
-3. Choose contacts (up to 250)
-4. Send to this number
-5. Get password-protected download
-
-⚡ **FEATURES:**
-- Instant CSV conversion
-- Handles all phone formats
-- Nigerian numbers auto-formatted
-- Secure 2-hour links
-- Password protection
-- **Multi-file processing**
-
-💡 **TIPS:**
-- Select multiple contacts at once
-- Works with iPhone & Android
-- Downloads work on any device
-- Send multiple files together
-
-_Standing by for your contacts..._`);
-}
-
-// Get active file count
-async function getActiveFileCount() {
-    if (redisClient) {
-        const keys = await redisClient.keys('file:*');
-        return keys.length;
-    } else {
-        // Clean expired files first
-        const now = Date.now();
-        Object.keys(fileStorage).forEach(key => {
-            if (fileStorage[key].expires < now) {
-                delete fileStorage[key];
-            }
-        });
-        return Object.keys(fileStorage).length;
-    }
-}
 
 // Download endpoint with password protection
 app.get('/download/:fileId', async (req, res) => {
@@ -341,100 +387,7 @@ app.get('/download/:fileId', async (req, res) => {
         `);
     }
     
-    // Check password
-    if (!p || p !== fileData.password) {
-        return res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Download Contacts CSV</title>
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <style>
-                    body {
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        min-height: 100vh;
-                        margin: 0;
-                        background: #f5f5f5;
-                    }
-                    .container {
-                        background: white;
-                        padding: 2rem;
-                        border-radius: 10px;
-                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                        max-width: 400px;
-                        width: 90%;
-                    }
-                    h1 {
-                        color: #333;
-                        margin-bottom: 1rem;
-                    }
-                    input {
-                        width: 100%;
-                        padding: 12px;
-                        font-size: 18px;
-                        border: 2px solid #ddd;
-                        border-radius: 5px;
-                        margin-bottom: 1rem;
-                        text-align: center;
-                        letter-spacing: 2px;
-                        box-sizing: border-box;
-                    }
-                    button {
-                        width: 100%;
-                        padding: 12px;
-                        font-size: 16px;
-                        background: #25D366;
-                        color: white;
-                        border: none;
-                        border-radius: 5px;
-                        cursor: pointer;
-                    }
-                    button:hover {
-                        background: #20B558;
-                    }
-                    .error {
-                        color: #e74c3c;
-                        margin-bottom: 1rem;
-                        text-align: center;
-                    }
-                    .info {
-                        color: #666;
-                        font-size: 14px;
-                        text-align: center;
-                        margin-top: 1rem;
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <h1>🔐 Enter Password</h1>
-                    ${p ? '<p class="error">❌ Incorrect password</p>' : ''}
-                    <form method="GET" action="/download/${fileId}">
-                        <input 
-                            type="text" 
-                            name="p" 
-                            placeholder="6-digit code" 
-                            maxlength="6" 
-                            pattern="[0-9]{6}"
-                            autocomplete="off"
-                            required 
-                            autofocus
-                        />
-                        <button type="submit">Download CSV</button>
-                    </form>
-                    <p class="info">
-                        💡 The password was sent to your WhatsApp
-                    </p>
-                </div>
-            </body>
-            </html>
-        `);
-    }
-    
-    // Send CSV file
+    // Send CSV file directly (no password in this version)
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${fileData.filename}"`);
     res.send(fileData.content);
@@ -444,13 +397,11 @@ app.get('/download/:fileId', async (req, res) => {
 
 // Health check endpoint
 app.get('/', async (req, res) => {
-    const fileCount = await getActiveFileCount();
-    
     res.send(`
         <!DOCTYPE html>
         <html>
         <head>
-            <title>WhatsApp CSV Converter</title>
+            <title>WhatsApp CSV Converter V2</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 body {
@@ -467,57 +418,24 @@ app.get('/', async (req, res) => {
                     box-shadow: 0 2px 10px rgba(0,0,0,0.1);
                 }
                 h1 { color: #25D366; }
-                .status { 
-                    background: #f0f0f0; 
-                    padding: 1rem; 
-                    border-radius: 5px;
-                    margin: 1rem 0;
-                }
-                .metric {
-                    display: flex;
-                    justify-content: space-between;
-                    padding: 0.5rem 0;
-                    border-bottom: 1px solid #eee;
-                }
-                .metric:last-child { border-bottom: none; }
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>🎖️ WhatsApp CSV Converter</h1>
+                <h1>🎖️ WhatsApp CSV Converter V2</h1>
                 <h2>Status: ✅ OPERATIONAL</h2>
                 
-                <div class="status">
-                    <h3>System Metrics</h3>
-                    <div class="metric">
-                        <span>Environment:</span>
-                        <strong>${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}</strong>
-                    </div>
-                    <div class="metric">
-                        <span>Storage:</span>
-                        <strong>${redisClient ? 'Redis Cloud' : 'In-Memory'}</strong>
-                    </div>
-                    <div class="metric">
-                        <span>Active Files:</span>
-                        <strong>${fileCount}</strong>
-                    </div>
-                    <div class="metric">
-                        <span>Uptime:</span>
-                        <strong>${Math.floor(process.uptime() / 60)} minutes</strong>
-                    </div>
-                    <div class="metric">
-                        <span>Webhook:</span>
-                        <strong>POST /webhook</strong>
-                    </div>
-                </div>
+                <h3>New V2 Features</h3>
+                <ul>
+                    <li>✅ Multi-file processing</li>
+                    <li>✅ Universal format support</li>
+                    <li>✅ Batch collection system</li>
+                    <li>✅ Smart text extraction</li>
+                    <li>✅ PDF parsing</li>
+                </ul>
                 
-                <h3>How to Use</h3>
-                <ol>
-                    <li>Send a WhatsApp message to your configured number</li>
-                    <li>Share contacts using the attachment button</li>
-                    <li>Receive a secure download link</li>
-                    <li>Download your CSV file</li>
-                </ol>
+                <h3>Supported Formats</h3>
+                <p>📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text</p>
                 
                 <p style="margin-top: 2rem; color: #666; text-align: center;">
                     Built with ❤️ for easy contact management
@@ -540,12 +458,12 @@ app.use((err, req, res, next) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('🚀 OPERATION: PARSE STORM - SYSTEMS ONLINE');
+    console.log('🚀 OPERATION: PARSE STORM V2 - SYSTEMS ONLINE');
     console.log(`📡 Listening on PORT: ${PORT}`);
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected' : 'In-Memory Mode'}`);
     console.log(`🌐 Base URL: ${BASE_URL}`);
-    console.log('\n📋 Webhook ready at: POST /webhook');
+    console.log('\n📋 Multi-file webhook ready at: POST /webhook');
 });
 
 // Cleanup expired files every 30 minutes
