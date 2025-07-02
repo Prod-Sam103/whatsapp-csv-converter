@@ -1,25 +1,21 @@
 {
   "name": "whatsapp-csv-converter",
-  "version": "1.0.0",
-  "description": "WhatsApp to CSV Contact Converter",
+  "version": "2.0.0",
+  "description": "WhatsApp to CSV Contact Converter with Excel/CSV import support",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "NODE_ENV=development node index.js",
-    "test": "node test-parser.js"
+    "test": "node tests/test-parser.js"
   },
-  "keywords": [
-    "whatsapp",
-    "csv",
-    "contacts",
-    "converter"
-  ],
+  "keywords": ["whatsapp", "csv", "contacts", "converter", "excel", "xlsx"],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "axios": "^1.7.2",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "papaparse": "^5.4.1",
     "redis": "^4.6.7",
     "twilio": "^5.2.0",
     "uuid": "^9.0.0",
