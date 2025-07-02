@@ -1,5 +1,5 @@
 [phases.build]
-cmds = ["npm ci --only=production"]
+cmds = ["npm install"]
 
 [phases.start]
 cmd = "node index.js"
