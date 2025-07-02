@@ -173,16 +173,25 @@ app.post('/webhook', async (req, res) => {
             
             // Create combined URL parameter for template (fileId with password)
             const urlParam = `${fileId}?p=${password}`;
+            const downloadUrl = `${BASE_URL}/download/${fileId}?p=${password}`;
             
-            // Send template message with download button
-            if (TEMPLATE_SID) {
-                await sendTemplateMessage(From, contacts.length, urlParam);
-            } else {
-                const downloadUrl = `${BASE_URL}/download/${fileId}?p=${password}`;
+            // TEMPORARILY DISABLE TEMPLATE - Use enhanced fallback
+            console.log('📱 Using fallback message (template disabled)');
+            twiml.message(`✅ *CSV Ready!*\n\n📊 Processed: ${contacts.length} contacts\n📎 Download: ${downloadUrl}\n🔑 Password: ${password}\n⏰ Expires: 2 hours\n\n💡 _Tap the link to download your CSV file_`);
+            
+            // Send template message with download button (DISABLED)
+            // if (TEMPLATE_SID) {
+            //     try {
+            //         await sendTemplateMessage(From, contacts.length, urlParam);
+            //     } catch (templateError) {
+            //         console.error('❌ Template failed, using fallback:', templateError);
+            //         twiml.message(`✅ *CSV Ready!*\n\n📊 ${contacts.length} contacts processed\n📎 Download: ${downloadUrl}\n🔑 Password: ${password}\n⏰ Expires: 2 hours`);
+            //     }
+            // } else {
                 // Fallback to regular message if template not configured
                 // Fallback to regular message if template not configured
-                twiml.message(`✅ **Operation Complete!**\n\n📊 Processed: ${contacts.length} contacts\n📎 File: contacts.csv\n🔗 Download: ${downloadUrl}\n🔑 Password: ${password}\n⏰ Expires: 2 hours`);
-            }
+                // twiml.message(`✅ **Operation Complete!**\n\n📊 Processed: ${contacts.length} contacts\n📎 File: contacts.csv\n🔗 Download: ${downloadUrl}\n🔑 Password: ${password}\n⏰ Expires: 2 hours`);
+            // }
             
         } else if (Body.toLowerCase() === 'help') {
             twiml.message(`🎖️ **WhatsApp CSV Converter**\n\n📋 **HOW TO USE:**\n1. Tap attachment (📎)\n2. Select "Contact" \n3. Choose contacts (up to 250)\n4. Send to this number\n5. Get download button\n\n⚡ **FEATURES:**\n- Instant CSV conversion\n- Nigerian numbers auto-formatted\n- Secure downloads\n- Password protection\n\n_Send contacts to get started..._`);
