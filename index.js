@@ -204,7 +204,8 @@ app.post('/webhook', async (req, res) => {
             twiml.message(`📊 **Operational Status**\n\n🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}\n📁 Active files: ${fileCount}\n⏱️ Uptime: ${Math.floor(process.uptime() / 60)} minutes\n🌐 Base URL: ${BASE_URL}\n💾 Storage: ${redisClient ? 'Redis Cloud' : 'In-Memory'}\n📋 Template: ${TEMPLATE_SID ? 'READY' : 'NOT CONFIGURED'}\n\n_All systems nominal_`);
             
         } else {
-            twiml.message(`👋 **CSV Converter Active!**\n\nShare contacts with me for instant CSV conversion.\n\nType *help* for instructions.`);
+            // Any other message - prompt for contacts
+            twiml.message(`📨 Drop your contact cards—let's bulk-load them! 🚀`);
         }
         
     } catch (error) {
@@ -248,10 +249,9 @@ async function getActiveFileCount() {
     }
 }
 
-// Download endpoint with password protection (unchanged)
+// Download endpoint with time-based expiry only
 app.get('/download/:fileId', async (req, res) => {
     const { fileId } = req.params;
-    const { p } = req.query;
     
     const fileData = await storage.get(`file:${fileId}`);
     
@@ -285,107 +285,17 @@ app.get('/download/:fileId', async (req, res) => {
             </head>
             <body>
                 <div class="container">
-                    <h1>❌ File Not Found</h1>
-                    <p>This file has expired or doesn't exist.</p>
-                    <p>Files are automatically deleted after 2 hours for security.</p>
+                    <h1>⏰ Link Expired</h1>
+                    <p>This download link has expired for security.</p>
+                    <p>Links automatically expire after 2 hours.</p>
+                    <p>Send your contacts again to get a new download link.</p>
                 </div>
             </body>
             </html>
         `);
     }
     
-    if (!p || p !== fileData.password) {
-        return res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Download Contacts CSV</title>
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <style>
-                    body {
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        min-height: 100vh;
-                        margin: 0;
-                        background: #f5f5f5;
-                    }
-                    .container {
-                        background: white;
-                        padding: 2rem;
-                        border-radius: 10px;
-                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                        max-width: 400px;
-                        width: 90%;
-                    }
-                    h1 {
-                        color: #333;
-                        margin-bottom: 1rem;
-                    }
-                    input {
-                        width: 100%;
-                        padding: 12px;
-                        font-size: 18px;
-                        border: 2px solid #ddd;
-                        border-radius: 5px;
-                        margin-bottom: 1rem;
-                        text-align: center;
-                        letter-spacing: 2px;
-                        box-sizing: border-box;
-                    }
-                    button {
-                        width: 100%;
-                        padding: 12px;
-                        font-size: 16px;
-                        background: #25D366;
-                        color: white;
-                        border: none;
-                        border-radius: 5px;
-                        cursor: pointer;
-                    }
-                    button:hover {
-                        background: #20B558;
-                    }
-                    .error {
-                        color: #e74c3c;
-                        margin-bottom: 1rem;
-                        text-align: center;
-                    }
-                    .info {
-                        color: #666;
-                        font-size: 14px;
-                        text-align: center;
-                        margin-top: 1rem;
-                    }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <h1>🔐 Enter Password</h1>
-                    ${p ? '<p class="error">❌ Incorrect password</p>' : ''}
-                    <form method="GET" action="/download/${fileId}">
-                        <input 
-                            type="text" 
-                            name="p" 
-                            placeholder="6-digit code" 
-                            maxlength="6" 
-                            pattern="[0-9]{6}"
-                            autocomplete="off"
-                            required 
-                            autofocus
-                        />
-                        <button type="submit">Download CSV</button>
-                    </form>
-                    <p class="info">
-                        💡 The password was sent to your WhatsApp
-                    </p>
-                </div>
-            </body>
-            </html>
-        `);
-    }
-    
+    // Direct download - no password needed
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${fileData.filename}"`);
     res.send(fileData.content);
