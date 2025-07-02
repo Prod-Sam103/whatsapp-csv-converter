@@ -1,212 +1,520 @@
-/**
- * WhatsApp CSV Converter – Set C UX + health routes
- * -------------------------------------------------
- * • multi-file intake  → confirmation  → duplicate resolver
- * • password-protected download link (sandbox-friendly)
- * • robust vCard parser lives in src/vcf-parser.js
- */
-
-const express  = require('express');
-const twilio   = require('twilio');
-const axios    = require('axios');
-const { v4: uuid } = require('uuid');
+const express = require('express');
+const twilio = require('twilio');
+const axios = require('axios');
+const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
-const { parseVCF }    = require('./src/vcf-parser');
+// Import tactical modules
+const { parseVCF } = require('./src/vcf-parser');
 const { generateCSV } = require('./src/csv-generator');
-const sessionStore    = require('./src/session-store');
 
-const app        = express();
-const PORT       = process.env.PORT || 3000;           // Railway sets 8080
-const BASE_URL   = process.env.BASE_URL ||
-                   `https://whatsapp-csv-converter-production.up.railway.app`;
-const FILE_TTL_S = 7200;                               // link valid 2 h
-const DUP_TIMEOUT_MS = 60_000;                         // 60 s duplicate prompt
-
+const app = express();
 app.use(express.urlencoded({ extended: false }));
-const twiml = () => new twilio.twiml.MessagingResponse();
 
-/* ---------- webhook ---------- */
+// PRODUCTION CONFIGURATION
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+const FILE_EXPIRY = 2 * 60 * 60 * 1000; // 2 hours
+
+// TESTING RESTRICTION - Only your number
+const AUTHORIZED_NUMBERS = ['+2348121364213']; // Your personal number
+
+// Template Configuration
+const TEMPLATE_SID = process.env.TEMPLATE_SID; // Will be set after template approval
+
+// Storage (will be replaced with Redis in production)
+let fileStorage = {};
+
+// Import Redis if in production
+let redisClient;
+if (IS_PRODUCTION && process.env.REDIS_URL) {
+    const redis = require('redis');
+    redisClient = redis.createClient({
+        url: process.env.REDIS_URL
+    });
+    
+    redisClient.on('error', (err) => console.log('Redis Client Error', err));
+    redisClient.connect().then(() => {
+        console.log('🔴 Redis: CONNECTED to production storage');
+    });
+}
+
+// Storage operations
+const storage = {
+    async set(key, value, expirySeconds = 7200) {
+        if (redisClient) {
+            await redisClient.set(key, JSON.stringify(value), {
+                EX: expirySeconds
+            });
+        } else {
+            fileStorage[key] = {
+                data: value,
+                expires: Date.now() + (expirySeconds * 1000)
+            };
+        }
+    },
+    
+    async get(key) {
+        if (redisClient) {
+            const data = await redisClient.get(key);
+            return data ? JSON.parse(data) : null;
+        } else {
+            const item = fileStorage[key];
+            if (!item) return null;
+            if (Date.now() > item.expires) {
+                delete fileStorage[key];
+                return null;
+            }
+            return item.data;
+        }
+    },
+    
+    async del(key) {
+        if (redisClient) {
+            await redisClient.del(key);
+        } else {
+            delete fileStorage[key];
+        }
+    }
+};
+
+// Check if number is authorized for testing
+function isAuthorizedNumber(phoneNumber) {
+    // Remove whatsapp: prefix if present
+    const cleanNumber = phoneNumber.replace('whatsapp:', '');
+    return AUTHORIZED_NUMBERS.includes(cleanNumber);
+}
+
+// Send template message with download button
+async function sendTemplateMessage(to, contactCount, urlParam) {
+    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    
+    console.log('🔍 Template Debug Info:');
+    console.log('Template SID:', TEMPLATE_SID);
+    console.log('Contact Count:', contactCount);
+    console.log('URL Param:', urlParam);
+    console.log('Content Variables:', JSON.stringify({
+        "1": contactCount.toString(),
+        "2": urlParam
+    }));
+    
+    try {
+        const message = await client.messages.create({
+            from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+            to: to,
+            contentSid: TEMPLATE_SID,
+            contentVariables: JSON.stringify({
+                "1": contactCount.toString(),
+                "2": urlParam  // This will be fileId?p=password
+            })
+        });
+        
+        console.log(`📤 Template message sent: ${message.sid}`);
+        return message;
+    } catch (error) {
+        console.error('❌ Template send error:', error);
+        throw error;
+    }
+}
+
+// Twilio webhook
 app.post('/webhook', async (req, res) => {
-  const { Body = '', From, NumMedia = 0 } = req.body;
-  const mediaCount = +NumMedia || 0;
-  const rsp = twiml();
-
-  try {
-    /* 1. duplicate-resolver state */
-    const dup = await sessionStore.getDupState(From);
-    if (dup) {
-      await handleDupReply({ Body, From, rsp, dup });
-      return sendXML(res, rsp);
+    const { Body, From, MediaUrl0, NumMedia } = req.body;
+    
+    console.log('📨 INCOMING TRANSMISSION:', new Date().toISOString());
+    console.log('From:', From);
+    console.log('Message:', Body);
+    console.log('Attachments:', NumMedia);
+    
+    const twiml = new twilio.twiml.MessagingResponse();
+    
+    try {
+        // TESTING RESTRICTION CHECK
+        if (!isAuthorizedNumber(From)) {
+            console.log(`🚫 Unauthorized number: ${From}`);
+            // Don't respond to unauthorized numbers during testing
+            res.type('text/xml');
+            res.send(twiml.toString());
+            return;
+        }
+        
+        // CONTACT PACKAGE DETECTED
+        if (NumMedia > 0 && MediaUrl0) {
+            console.log('📎 Contact package detected:', MediaUrl0);
+            
+            // Download VCF file
+            const vcfContent = await downloadMedia(MediaUrl0, req);
+            
+            // Parse contacts
+            const contacts = parseVCF(vcfContent);
+            
+            if (contacts.length === 0) {
+                twiml.message(`❌ No contacts found in the file.\n\nPlease ensure you're sharing a valid contact file.`);
+                res.type('text/xml');
+                res.send(twiml.toString());
+                return;
+            }
+            
+            // Generate CSV
+            const csv = generateCSV(contacts);
+            
+            // Create secure file
+            const fileId = uuidv4();
+            const password = Math.floor(100000 + Math.random() * 900000).toString();
+            
+            await storage.set(`file:${fileId}`, {
+                content: csv,
+                filename: `contacts_${Date.now()}.csv`,
+                password: password,
+                from: From,
+                created: Date.now(),
+                contactCount: contacts.length
+            });
+            
+            // Create combined URL parameter for template (fileId with password)
+            const urlParam = `${fileId}?p=${password}`;
+            
+            // Send template message with download button
+            if (TEMPLATE_SID) {
+                await sendTemplateMessage(From, contacts.length, urlParam);
+            } else {
+                const downloadUrl = `${BASE_URL}/download/${fileId}?p=${password}`;
+                // Fallback to regular message if template not configured
+                // Fallback to regular message if template not configured
+                twiml.message(`✅ **Operation Complete!**\n\n📊 Processed: ${contacts.length} contacts\n📎 File: contacts.csv\n🔗 Download: ${downloadUrl}\n🔑 Password: ${password}\n⏰ Expires: 2 hours`);
+            }
+            
+        } else if (Body.toLowerCase() === 'help') {
+            twiml.message(`🎖️ **WhatsApp CSV Converter**\n\n📋 **HOW TO USE:**\n1. Tap attachment (📎)\n2. Select "Contact" \n3. Choose contacts (up to 250)\n4. Send to this number\n5. Get download button\n\n⚡ **FEATURES:**\n- Instant CSV conversion\n- Nigerian numbers auto-formatted\n- Secure downloads\n- Password protection\n\n_Send contacts to get started..._`);
+            
+        } else if (Body.toLowerCase() === 'test') {
+            twiml.message(`✅ **Systems Check Complete**\n\n🟢 Bot: OPERATIONAL\n🟢 Parser: ARMED\n🟢 CSV Generator: READY\n🟢 Storage: ${redisClient ? 'REDIS' : 'MEMORY'}\n🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}\n🟢 Template: ${TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}\n\n_Ready to receive contact packages!_`);
+            
+        } else if (Body.toLowerCase() === 'status') {
+            const fileCount = await getActiveFileCount();
+            twiml.message(`📊 **Operational Status**\n\n🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}\n📁 Active files: ${fileCount}\n⏱️ Uptime: ${Math.floor(process.uptime() / 60)} minutes\n🌐 Base URL: ${BASE_URL}\n💾 Storage: ${redisClient ? 'Redis Cloud' : 'In-Memory'}\n📋 Template: ${TEMPLATE_SID ? 'READY' : 'NOT CONFIGURED'}\n\n_All systems nominal_`);
+            
+        } else {
+            twiml.message(`👋 **CSV Converter Active!**\n\nShare contacts with me for instant CSV conversion.\n\nType *help* for instructions.`);
+        }
+        
+    } catch (error) {
+        console.error('❌ Operation failed:', error);
+        twiml.message(`❌ Operation failed. Please try again.\n\nIf the problem persists, contact support.`);
     }
-
-    /* 2. media intake */
-    if (mediaCount) {
-      const total = await handleMediaBatch({ req, From, mediaCount });
-      rsp.message(
-        `💾 *${total}* saved so far.\n\n` +       // ← extra blank line here
-        `Tap 1️⃣ to export • 2️⃣ to keep loading`
-      );
-      return sendXML(res, rsp);
-    }
-
-    /* 3. key commands */
-    const key = Body.trim();
-    if (key === '2') {
-      rsp.message('👌 Fire away—waiting…');
-      return sendXML(res, rsp);
-    }
-    if (key === '1') {
-      await beginConversion({ From, rsp });
-      return sendXML(res, rsp);
-    }
-
-    /* 4. idle / help */
-    rsp.message('📨 Drop your contact cards—let’s bulk-load them! 🚀');
-  } catch (err) {
-    console.error(err);
-    rsp.message('🛑 Glitch detected. Let’s try that again.');
-  }
-  sendXML(res, rsp);
+    
+    res.type('text/xml');
+    res.send(twiml.toString());
 });
 
-/* ---------- handlers ---------- */
-async function handleMediaBatch({ req, From, mediaCount }) {
-  const contacts = [];
-  for (let i = 0; i < mediaCount; i++) {
-    const url = req.body[`MediaUrl${i}`];
-    if (!url) continue;
-    contacts.push(...parseVCF(await fetchVCF(url)));
-  }
-  return sessionStore.appendContacts(From, contacts);
+// Download media from Twilio
+async function downloadMedia(mediaUrl, req) {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    
+    const response = await axios.get(mediaUrl, {
+        auth: {
+            username: accountSid,
+            password: authToken
+        },
+        responseType: 'text'
+    });
+    
+    return response.data;
 }
 
-async function beginConversion({ From, rsp }) {
-  const staged = await sessionStore.popContacts(From);
-  if (!staged.length) {
-    rsp.message('🕳️ Nothing here yet. Send a card to kick off.');
-    return;
-  }
-
-  const { uniques, duplicates } = splitDuplicates(staged);
-
-  if (duplicates.length) {
-    await sessionStore.setDupState(
-      From,
-      { uniques, duplicates, cursor: 0, chosen: [] },
-      DUP_TIMEOUT_MS / 1000
-    );
-    promptNextDup({ From, rsp });
-    return;
-  }
-
-  await sendCsv({ From, list: uniques, rsp });
+// Get active file count
+async function getActiveFileCount() {
+    if (redisClient) {
+        const keys = await redisClient.keys('file:*');
+        return keys.length;
+    } else {
+        const now = Date.now();
+        Object.keys(fileStorage).forEach(key => {
+            if (fileStorage[key].expires < now) {
+                delete fileStorage[key];
+            }
+        });
+        return Object.keys(fileStorage).length;
+    }
 }
 
-async function handleDupReply({ Body, From, rsp, dup }) {
-  if (!/^[12]$/.test(Body.trim())) {
-    rsp.message('⛔ Just 1 or 2, please.');
-    return;
-  }
+// Download endpoint with password protection (unchanged)
+app.get('/download/:fileId', async (req, res) => {
+    const { fileId } = req.params;
+    const { p } = req.query;
+    
+    const fileData = await storage.get(`file:${fileId}`);
+    
+    if (!fileData) {
+        return res.status(404).send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>File Not Found</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 100vh;
+                        margin: 0;
+                        background: #f5f5f5;
+                    }
+                    .container {
+                        background: white;
+                        padding: 2rem;
+                        border-radius: 10px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                        text-align: center;
+                        max-width: 400px;
+                    }
+                    h1 { color: #e74c3c; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>❌ File Not Found</h1>
+                    <p>This file has expired or doesn't exist.</p>
+                    <p>Files are automatically deleted after 2 hours for security.</p>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+    
+    if (!p || p !== fileData.password) {
+        return res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Download Contacts CSV</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 100vh;
+                        margin: 0;
+                        background: #f5f5f5;
+                    }
+                    .container {
+                        background: white;
+                        padding: 2rem;
+                        border-radius: 10px;
+                        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                        max-width: 400px;
+                        width: 90%;
+                    }
+                    h1 {
+                        color: #333;
+                        margin-bottom: 1rem;
+                    }
+                    input {
+                        width: 100%;
+                        padding: 12px;
+                        font-size: 18px;
+                        border: 2px solid #ddd;
+                        border-radius: 5px;
+                        margin-bottom: 1rem;
+                        text-align: center;
+                        letter-spacing: 2px;
+                        box-sizing: border-box;
+                    }
+                    button {
+                        width: 100%;
+                        padding: 12px;
+                        font-size: 16px;
+                        background: #25D366;
+                        color: white;
+                        border: none;
+                        border-radius: 5px;
+                        cursor: pointer;
+                    }
+                    button:hover {
+                        background: #20B558;
+                    }
+                    .error {
+                        color: #e74c3c;
+                        margin-bottom: 1rem;
+                        text-align: center;
+                    }
+                    .info {
+                        color: #666;
+                        font-size: 14px;
+                        text-align: center;
+                        margin-top: 1rem;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>🔐 Enter Password</h1>
+                    ${p ? '<p class="error">❌ Incorrect password</p>' : ''}
+                    <form method="GET" action="/download/${fileId}">
+                        <input 
+                            type="text" 
+                            name="p" 
+                            placeholder="6-digit code" 
+                            maxlength="6" 
+                            pattern="[0-9]{6}"
+                            autocomplete="off"
+                            required 
+                            autofocus
+                        />
+                        <button type="submit">Download CSV</button>
+                    </form>
+                    <p class="info">
+                        💡 The password was sent to your WhatsApp
+                    </p>
+                </div>
+            </body>
+            </html>
+        `);
+    }
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileData.filename}"`);
+    res.send(fileData.content);
+    
+    console.log(`📥 File downloaded: ${fileId} (${fileData.contactCount || 0} contacts)`);
+});
 
-  dup.chosen.push(
-    dup.duplicates[dup.cursor][Body.trim() === '1' ? 0 : 1]
-  );
-  dup.cursor++;
-
-  if (dup.cursor < dup.duplicates.length) {
-    await sessionStore.setDupState(From, dup, DUP_TIMEOUT_MS / 1000);
-    promptNextDup({ From, rsp });
-    return;
-  }
-
-  await sessionStore.clearDupState(From);
-  await sendCsv({ From, list: dup.uniques.concat(dup.chosen), rsp });
-}
-
-/* ---------- utilities ---------- */
-async function fetchVCF(url) {
-  const { TWILIO_ACCOUNT_SID: sid, TWILIO_AUTH_TOKEN: tok } = process.env;
-  const r = await axios.get(url, {
-    auth: { username: sid, password: tok },
-    responseType: 'text'
-  });
-  return r.data;
-}
-
-function splitDuplicates(list) {
-  const map = new Map();
-  list.forEach(c => {
-    if (!c.mobile) return;
-    if (!map.has(c.mobile)) map.set(c.mobile, []);
-    map.get(c.mobile).push(c);
-  });
-
-  const uniques = [], duplicates = [];
-  for (const arr of map.values()) {
-    if (arr.length === 1) uniques.push(arr[0]);
-    else duplicates.push(arr);
-  }
-  return { uniques, duplicates };
-}
-
-function promptNextDup({ From, rsp }) {
-  sessionStore.getDupState(From).then(state => {
-    const g = state.duplicates[state.cursor];
-    rsp.message(
-      `🤹‍♂️ Duplicate spotted for ${g[0].mobile}:\n` +
-      `1️⃣ ${g[0].name || 'No Name'}\n` +
-      `2️⃣ ${g[1].name || 'No Name'}`
-    );
-  });
-}
-
-async function sendCsv({ From, list, rsp }) {
-  const csv = generateCSV(list);
-  const id  = uuid();
-  const pw  = Math.floor(100000 + Math.random() * 900000).toString();
-
-  await sessionStore.setTempFile(id, {
-    content: csv,
-    filename: `contacts_${Date.now()}.csv`,
-    password: pw,
-    owner: From
-  }, FILE_TTL_S);
-
-  const link = `${BASE_URL}/download/${id}`;
-  rsp.message(
-    `🎉 Done! *${list.length}* contacts ready.\n` +
-    `🔗 ${link} (PW ${pw}, 2 hrs)`
-  );
-}
-
-function sendXML(res, t) { res.type('text/xml').send(t.toString()); }
-
-/* ---------- download ---------- */
-app.get('/download/:id', async (req, res) => {
-  const file = await sessionStore.getTempFile(req.params.id);
-  if (!file) return res.status(404).send('Link expired.');
-
-  if (req.query.p !== file.password) {
-    return res.status(401).send(`
-      <h2>🔐 Enter 6-digit password</h2>
-      <form>
-        <input name="p" maxlength="6" pattern="[0-9]{6}" required autofocus>
-        <button type="submit">Download CSV</button>
-      </form>
-      ${req.query.p ? '<p style="color:red">Incorrect password</p>' : ''}
+// Health check endpoint (unchanged)
+app.get('/', async (req, res) => {
+    const fileCount = await getActiveFileCount();
+    
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>WhatsApp CSV Converter</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+                    max-width: 800px;
+                    margin: 0 auto;
+                    padding: 2rem;
+                    background: #f5f5f5;
+                }
+                .container {
+                    background: white;
+                    padding: 2rem;
+                    border-radius: 10px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                }
+                h1 { color: #25D366; }
+                .status { 
+                    background: #f0f0f0; 
+                    padding: 1rem; 
+                    border-radius: 5px;
+                    margin: 1rem 0;
+                }
+                .metric {
+                    display: flex;
+                    justify-content: space-between;
+                    padding: 0.5rem 0;
+                    border-bottom: 1px solid #eee;
+                }
+                .metric:last-child { border-bottom: none; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>🎖️ WhatsApp CSV Converter</h1>
+                <h2>Status: ✅ OPERATIONAL (Testing Mode)</h2>
+                
+                <div class="status">
+                    <h3>System Metrics</h3>
+                    <div class="metric">
+                        <span>Environment:</span>
+                        <strong>${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}</strong>
+                    </div>
+                    <div class="metric">
+                        <span>Storage:</span>
+                        <strong>${redisClient ? 'Redis Cloud' : 'In-Memory'}</strong>
+                    </div>
+                    <div class="metric">
+                        <span>Active Files:</span>
+                        <strong>${fileCount}</strong>
+                    </div>
+                    <div class="metric">
+                        <span>Template:</span>
+                        <strong>${TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}</strong>
+                    </div>
+                    <div class="metric">
+                        <span>Testing Mode:</span>
+                        <strong>Restricted to authorized numbers</strong>
+                    </div>
+                    <div class="metric">
+                        <span>Uptime:</span>
+                        <strong>${Math.floor(process.uptime() / 60)} minutes</strong>
+                    </div>
+                </div>
+                
+                <h3>How to Use</h3>
+                <ol>
+                    <li>Send a WhatsApp message to +16466030424</li>
+                    <li>Share contacts using the attachment button</li>
+                    <li>Receive a message with download button</li>
+                    <li>Click button to download your CSV file</li>
+                </ol>
+                
+                <p style="margin-top: 2rem; color: #666; text-align: center;">
+                    Built with ❤️ for easy contact management
+                </p>
+            </div>
+        </body>
+        </html>
     `);
-  }
-
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition',
-    `attachment; filename="${file.filename}"`);
-  res.send(file.content);
 });
 
-/* ---------- health checks ---------- */
-app.get('/health', (req, res) => res.sendStatus(200));
-app.get('/',       (req, res) => res.send('👍 Alive'));
+// Error handling
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err);
+    res.status(500).json({
+        error: 'Internal server error',
+        message: IS_PRODUCTION ? 'Something went wrong' : err.message
+    });
+});
 
-/* ---------- start ---------- */
-app.listen(PORT, () => console.log(`🚀 CSV-bot running on ${PORT}`));
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log('🚀 OPERATION: TEMPLATE STORM - SYSTEMS ONLINE');
+    console.log(`📡 Listening on PORT: ${PORT}`);
+    console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
+    console.log(`💾 Storage: ${redisClient ? 'Redis Connected' : 'In-Memory Mode'}`);
+    console.log(`🌐 Base URL: ${BASE_URL}`);
+    console.log(`📋 Template SID: ${TEMPLATE_SID || 'NOT CONFIGURED'}`);
+    console.log(`🚫 Testing Mode: Only authorized numbers can access`);
+    console.log(`✅ Authorized Numbers: ${AUTHORIZED_NUMBERS.join(', ')}`);
+    console.log('\n📋 Webhook ready at: POST /webhook');
+});
+
+// Cleanup expired files every 30 minutes
+setInterval(async () => {
+    if (!redisClient) {
+        const now = Date.now();
+        Object.keys(fileStorage).forEach(key => {
+            if (fileStorage[key].expires < now) {
+                delete fileStorage[key];
+                console.log(`🗑️ Cleaned expired file: ${key}`);
+            }
+        });
+    }
+}, 30 * 60 * 1000);
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+    console.log('📴 Shutting down gracefully...');
+    if (redisClient) {
+        await redisClient.quit();
+    }
+    process.exit(0);
+});
