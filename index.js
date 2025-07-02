@@ -127,11 +127,16 @@ async function parseContactMedia(mediaUrl, req) {
     }
 }
 
-// FIXED: Enhanced Template Message Function
+// CORRECTED: Template Message Function
 async function sendTemplateMessage(to, contactCount, fileId) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
     const downloadUrl = `${BASE_URL}/download/${fileId}`;
+    
+    // Use your Twilio WhatsApp number (clean format)
+    const fromNumber = '+16466030424'; // Your Twilio number
+    
+    console.log(`🚀 Sending template message from: ${fromNumber} to: ${to}`);
     
     try {
         // Option 1: Use WhatsApp Business Template (if configured)
@@ -139,8 +144,8 @@ async function sendTemplateMessage(to, contactCount, fileId) {
             console.log('🚀 Attempting WhatsApp Business Template...');
             try {
                 await client.messages.create({
-                    from: process.env.TWILIO_PHONE_NUMBER,
-                    to: to,
+                    from: `whatsapp:${fromNumber}`,
+                    to: to, // to is already in whatsapp:+2348121364213 format
                     contentSid: TEMPLATE_SID,
                     contentVariables: JSON.stringify({
                         "1": contactCount.toString(),
@@ -150,43 +155,41 @@ async function sendTemplateMessage(to, contactCount, fileId) {
                 console.log('✅ Template message sent successfully!');
                 return;
             } catch (templateError) {
-                console.error('❌ Business template failed:', templateError);
+                console.error('❌ Business template failed:', templateError.message);
             }
         }
         
-        // Option 2: Rich Media Message with Action Button
-        console.log('🚀 Attempting rich media message...');
+        // Option 2: Try WhatsApp message with button-like formatting
+        console.log('🚀 Attempting structured WhatsApp message...');
         try {
             await client.messages.create({
-                from: process.env.TWILIO_PHONE_NUMBER,
+                from: `whatsapp:${fromNumber}`,
                 to: to,
-                body: `✅ **Your CSV file with ${contactCount} contacts is ready!**`,
-                persistentAction: ['Download CSV'],
-                mediaUrl: [downloadUrl]
-            });
-            console.log('✅ Rich media message sent!');
-            return;
-        } catch (richMediaError) {
-            console.error('❌ Rich media failed:', richMediaError);
-        }
-        
-        // Option 3: Enhanced Fallback Message
-        console.log('🚀 Using enhanced fallback message...');
-        await client.messages.create({
-            from: process.env.TWILIO_PHONE_NUMBER,
-            to: to,
-            body: `✅ **Your CSV file with ${contactCount} contacts is ready for download!**
+                body: `✅ *Your CSV file with ${contactCount} contacts is ready for download!*
 
 📎 *Download CSV*
 ${downloadUrl}
 
 ⏰ _Link expires in 2 hours_
 💡 _Tap the link above to download your file_`
+            });
+            console.log('✅ Structured WhatsApp message sent!');
+            return;
+        } catch (structuredError) {
+            console.error('❌ Structured message failed:', structuredError.message);
+        }
+        
+        // Option 3: Simple fallback (this should always work)
+        console.log('🚀 Using simple fallback message...');
+        await client.messages.create({
+            from: `whatsapp:${fromNumber}`,
+            to: to,
+            body: `Your CSV file with ${contactCount} contacts is ready!\n\nDownload: ${downloadUrl}\n\nExpires in 2 hours.`
         });
-        console.log('✅ Fallback message sent!');
+        console.log('✅ Simple fallback message sent!');
         
     } catch (finalError) {
-        console.error('❌ All template methods failed:', finalError);
+        console.error('❌ All template methods failed:', finalError.message);
         throw finalError;
     }
 }
