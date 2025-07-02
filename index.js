@@ -147,7 +147,13 @@ app.post('/webhook', async (req, res) => {
             
             // Download and parse new VCF file
             const vcfContent = await downloadMedia(MediaUrl0, req);
+            console.log('🔍 VCF Content Preview:', vcfContent.substring(0, 500));
+            console.log('🔍 VCF Content Length:', vcfContent.length);
+            console.log('🔍 Number of BEGIN:VCARD occurrences:', (vcfContent.match(/BEGIN:VCARD/gi) || []).length);
+            
             const newContacts = parseVCF(vcfContent);
+            console.log('🔍 Parsed contacts count:', newContacts.length);
+            console.log('🔍 Parsed contacts:', newContacts.map(c => c.name).join(', '));
             
             if (newContacts.length === 0) {
                 twiml.message(`❌ No contacts found in the file.\n\nPlease ensure you're sharing a valid contact file.`);
