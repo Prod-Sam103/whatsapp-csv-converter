@@ -1,10 +1,12 @@
+// index.js
+
 const express = require('express');
 const twilio = require('twilio');
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
-// Import tactical modules
+// Import parsing modules
 const { parseVCF } = require('./src/vcf-parser');
 const { generateCSV } = require('./src/csv-generator');
 const { parseContactFile, getSupportedFormats } = require('./src/csv-excel-parser');
@@ -12,41 +14,32 @@ const { parseContactFile, getSupportedFormats } = require('./src/csv-excel-parse
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 
-// PRODUCTION CONFIGURATION
+// Production config
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 const FILE_EXPIRY = 2 * 60 * 60 * 1000; // 2 hours
 
-// TESTING RESTRICTION - Only your number
-const AUTHORIZED_NUMBERS = ['+2348121364213']; // Your personal number
+// Restrict access to only your number for now
+const AUTHORIZED_NUMBERS = ['+2348121364213', '+16466030424']; // Add yours here
 
-// Template Configuration
+// Template SID for Twilio template
 const TEMPLATE_SID = process.env.TEMPLATE_SID;
 
-// Storage (will be replaced with Redis in production)
+// Storage (in-memory for dev, redis for prod)
 let fileStorage = {};
-
-// Import Redis if in production
 let redisClient;
 if (IS_PRODUCTION && process.env.REDIS_URL) {
     const redis = require('redis');
-    redisClient = redis.createClient({
-        url: process.env.REDIS_URL
-    });
-    
-    redisClient.on('error', (err) => console.log('Redis Client Error', err));
-    redisClient.connect().then(() => {
-        console.log('🔴 Redis: CONNECTED to production storage');
-    });
+    redisClient = redis.createClient({ url: process.env.REDIS_URL });
+    redisClient.on('error', (err) => console.log('Redis Error', err));
+    redisClient.connect().then(() => console.log('Redis Connected'));
 }
 
-// Storage operations
+// Storage ops
 const storage = {
     async set(key, value, expirySeconds = 7200) {
         if (redisClient) {
-            await redisClient.set(key, JSON.stringify(value), {
-                EX: expirySeconds
-            });
+            await redisClient.set(key, JSON.stringify(value), { EX: expirySeconds });
         } else {
             fileStorage[key] = {
                 data: value,
@@ -54,7 +47,6 @@ const storage = {
             };
         }
     },
-    
     async get(key) {
         if (redisClient) {
             const data = await redisClient.get(key);
@@ -69,7 +61,6 @@ const storage = {
             return item.data;
         }
     },
-    
     async del(key) {
         if (redisClient) {
             await redisClient.del(key);
@@ -79,125 +70,153 @@ const storage = {
     }
 };
 
-// Check if number is authorized for testing
+// Restrict to authorised numbers only
 function isAuthorizedNumber(phoneNumber) {
     const cleanNumber = phoneNumber.replace('whatsapp:', '');
     return AUTHORIZED_NUMBERS.includes(cleanNumber);
 }
 
-// Twilio webhook
+// ----------- CONTACT MEDIA PARSER ----------- //
+async function parseContactMedia(mediaUrl, req) {
+    // Download the file
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+    const response = await axios.get(mediaUrl, {
+        auth: { username: accountSid, password: authToken },
+        responseType: 'arraybuffer'
+    });
+
+    const fileBuffer = Buffer.from(response.data);
+    const contentType = response.headers['content-type'] || '';
+
+    // Handle each format
+    if (contentType.includes('text/x-vcard') || contentType.includes('text/vcard')) {
+        // VCF
+        const vcfContent = fileBuffer.toString('utf8');
+        return parseVCF(vcfContent);
+    } else if (contentType.includes('text/csv') || contentType.includes('application/csv')) {
+        // CSV
+        return parseContactFile(fileBuffer, 'contacts.csv');
+    } else if (contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+        // Excel xlsx
+        return parseContactFile(fileBuffer, 'contacts.xlsx');
+    } else if (contentType.includes('application/vnd.ms-excel')) {
+        // Excel xls
+        return parseContactFile(fileBuffer, 'contacts.xls');
+    } else if (contentType.includes('application/pdf')) {
+        // PDF
+        return parseContactFile(fileBuffer, 'contacts.pdf');
+    } else if (contentType.includes('text/plain')) {
+        // Text file
+        return parseContactFile(fileBuffer, 'contacts.txt');
+    } else {
+        // Fallback: Try VCF first, then text
+        const vcfContent = fileBuffer.toString('utf8');
+        if (vcfContent.includes('BEGIN:VCARD')) {
+            return parseVCF(vcfContent);
+        }
+        // Fallback to text parser
+        return parseContactFile(fileBuffer, 'contacts.txt');
+    }
+}
+
+// ----------- TWILIO BOT LOGIC ----------- //
 app.post('/webhook', async (req, res) => {
     const { Body, From, MediaUrl0, NumMedia } = req.body;
-    
-    console.log('📨 INCOMING TRANSMISSION:', new Date().toISOString());
-    console.log('From:', From);
-    console.log('Message:', Body);
-    console.log('Attachments:', NumMedia);
-    
     const twiml = new twilio.twiml.MessagingResponse();
-    
+
     try {
-        // TESTING RESTRICTION CHECK
+        // Authorisation
         if (!isAuthorizedNumber(From)) {
-            console.log(`🚫 Unauthorized number: ${From}`);
-            res.type('text/xml');
-            res.send(twiml.toString());
-            return;
+            return res.type('text/xml').send(twiml.toString());
         }
-        
-        // CONTACT FILE DETECTED (VCF, CSV, Excel)
+
+        // FILE RECEIVED
         if (NumMedia > 0 && MediaUrl0) {
-            console.log('📎 Contact file detected:', MediaUrl0);
-            
-            // Get existing batch or create new one
             let batch = await storage.get(`batch:${From}`) || { contacts: [], count: 0 };
-            
             try {
-                // Parse using universal parser
                 const newContacts = await parseContactMedia(MediaUrl0, req);
-                console.log('🔍 Parsed contacts:', newContacts.length);
-                
-                if (newContacts.length === 0) {
-                    twiml.message(`❌ No contacts found in the file.\n\nSupported formats: VCF, CSV, Excel, PDF, Text\nRequired: Name or Phone number`);
-                    res.type('text/xml');
-                    res.send(twiml.toString());
-                    return;
+                if (!newContacts.length) {
+                    twiml.message("❌ Couldn’t find any contacts in that file. Make sure it’s in VCF, CSV, Excel, PDF or Text format, and includes at least a name or phone number.");
+                } else {
+                    batch.contacts.push(...newContacts);
+                    batch.count = batch.contacts.length;
+                    batch.lastUpdated = Date.now();
+                    await storage.set(`batch:${From}`, batch, 600);
+                    twiml.message(`💾 ${batch.count} contacts saved so far.  \n\nTap 1️⃣ to export • 2️⃣ to add more files\n\n_Supported: VCF, CSV, Excel, PDF, Text_`);
                 }
-                
-                // Add to batch
-                batch.contacts.push(...newContacts);
-                batch.count = batch.contacts.length;
-                batch.lastUpdated = Date.now();
-                
-                // Save batch (expires in 10 minutes)
-                await storage.set(`batch:${From}`, batch, 600);
-                
-                // Send confirmation message
-                twiml.message(`💾 ${batch.count} saved so far.\n\nTap 1️⃣ to export • 2️⃣ to keep adding`);
-                
-            } catch (parseError) {
-                console.error('❌ File parsing error:', parseError);
-                twiml.message(`❌ Could not parse file: ${parseError.message}\n\nSupported formats:\n📇 VCF (contacts)\n📊 CSV files\n📗 Excel (.xlsx, .xls)\n📄 PDF documents\n📝 Text files\n\nRequired: Name or Phone number`);
+            } catch (err) {
+                twiml.message("❌ Sorry, I couldn’t process that file. Please check the format and try again (VCF, CSV, Excel, PDF or Text supported).");
             }
-            
-        } else if (Body === '1️⃣' || Body === '1') {
-            // Export current batch
+            return res.type('text/xml').send(twiml.toString());
+        }
+
+        // EXPORT BATCH
+        if (Body === '1' || Body === '1️⃣') {
             const batch = await storage.get(`batch:${From}`);
-            
-            if (!batch || batch.contacts.length === 0) {
-                twiml.message(`❌ No contacts to export.\n\nSend some contact files first!`);
-                res.type('text/xml');
-                res.send(twiml.toString());
-                return;
+            if (!batch || !batch.contacts.length) {
+                twiml.message("❌ No contacts to export yet. Please upload your contact files first!");
+                return res.type('text/xml').send(twiml.toString());
             }
-            
-            // Generate CSV from batch
             const csv = generateCSV(batch.contacts);
-            
-            // Create secure file (no password needed)
             const fileId = uuidv4();
-            
             await storage.set(`file:${fileId}`, {
                 content: csv,
-                filename: `sugar_contacts_${Date.now()}.csv`,
+                filename: `contacts_${Date.now()}.csv`,
                 from: From,
                 created: Date.now(),
                 contactCount: batch.contacts.length
             });
-            
             const downloadUrl = `${BASE_URL}/download/${fileId}`;
-            
-            // Try template first, then fallback
-            try {
-                console.log('🚀 Sending template message...');
-                await sendTemplateMessage(From, batch.contacts.length, fileId);
-                console.log('✅ Template message sent successfully!');
-            } catch (templateError) {
-                console.error('❌ Template failed, using fallback:', templateError);
-                twiml.message(`✅ *CSV Ready!*\n\n📊 Processed: ${batch.contacts.length} contacts\n📎 Download: ${downloadUrl}\n⏰ Expires: 2 hours\n\n💡 _Tap the link to download your CSV file_`);
-            }
-            
-            // Clear batch after export
+            twiml.message(`✅ Your CSV file with ${batch.contacts.length} contacts is ready!  \n\n[Download CSV](${downloadUrl})  \n\nLink expires in 2 hours.`);
             await storage.del(`batch:${From}`);
-            
-        } else if (Body === '2️⃣' || Body === '2') {
-            // Continue adding - just acknowledge
-            twiml.message(`📨 Drop your contact files—let's bulk-load them! 🚀\n\n📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text supported`);
-            
-        } else {
-            // Any other message - prompt for contact files
-            twiml.message(`📨 Drop your contact files—let's bulk-load them! 🚀\n\n📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text\n\nType 'help' for instructions`);
+            return res.type('text/xml').send(twiml.toString());
         }
-        
-    } catch (error) {
-        console.error('❌ Operation failed:', error);
-        twiml.message(`❌ Operation failed. Please try again.\n\nIf the problem persists, contact support.`);
+
+        // ADD MORE
+        if (Body === '2' || Body === '2️⃣') {
+            twiml.message("📥 Ready for more! Just upload the next contact file.\n\n_Supported formats: VCF, CSV, Excel, PDF, Text_");
+            return res.type('text/xml').send(twiml.toString());
+        }
+
+        // HELP/INFO
+        if (Body.toLowerCase() === 'help') {
+            twiml.message(
+                "📋 *How to use this bot:*\n" +
+                "1. Upload a contact file (VCF, CSV, Excel, PDF, or Text)\n" +
+                "2. I’ll parse all the contacts—repeat to add more files\n" +
+                "3. Tap 1️⃣ to export to CSV, or 2️⃣ to keep adding\n\n" +
+                "_Supported: VCF, CSV, Excel, PDF, Text_"
+            );
+            return res.type('text/xml').send(twiml.toString());
+        }
+
+        // Unknown text – prompt to upload
+        twiml.message("👋 Upload a contact file to get started!  \n_Supported: VCF, CSV, Excel, PDF, Text_  \n\nType 'help' for instructions.");
+        return res.type('text/xml').send(twiml.toString());
+    } catch (err) {
+        console.error('❌ BOT ERROR:', err);
+        twiml.message("❌ Something went wrong. Please try again in a moment!");
+        return res.type('text/xml').send(twiml.toString());
     }
-    
-    res.type('text/xml');
-    res.send(twiml.toString());
 });
 
-app.listen(process.env.PORT || 3000, () => {
-    console.log(`Server is running on port ${process.env.PORT || 3000}`);
+// ----------- DOWNLOAD ENDPOINT ----------- //
+app.get('/download/:fileId', async (req, res) => {
+    const { fileId } = req.params;
+    const fileData = await storage.get(`file:${fileId}`);
+    if (!fileData) {
+        return res.status(404).send("⏰ This download link has expired. Please upload your contacts again.");
+    }
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileData.filename}"`);
+    res.send(fileData.content);
 });
+
+// ----------- SERVER START ----------- //
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🚀 Universal WhatsApp Contact Parser is running on port ${PORT}`);
+});
+
