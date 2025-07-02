@@ -127,16 +127,18 @@ async function parseContactMedia(mediaUrl, req) {
     }
 }
 
-// CORRECTED: Template Message Function
+// FIXED: Template Message Function with correct URL generation
 async function sendTemplateMessage(to, contactCount, fileId) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
-    const downloadUrl = `${BASE_URL}/download/${fileId}`;
+    // FIX: Ensure fileId is clean and create proper URL
+    const cleanFileId = typeof fileId === 'string' ? fileId.split('/').pop() : fileId;
+    const downloadUrl = `${BASE_URL}/download/${cleanFileId}`;
+    
+    console.log(`🚀 Template message - FileID: ${cleanFileId}, URL: ${downloadUrl}`);
     
     // Use your Twilio WhatsApp number (clean format)
-    const fromNumber = '+16466030424'; // Your Twilio number
-    
-    console.log(`🚀 Sending template message from: ${fromNumber} to: ${to}`);
+    const fromNumber = '+16466030424';
     
     try {
         // Option 1: Use WhatsApp Business Template (if configured)
@@ -145,7 +147,7 @@ async function sendTemplateMessage(to, contactCount, fileId) {
             try {
                 await client.messages.create({
                     from: `whatsapp:${fromNumber}`,
-                    to: to, // to is already in whatsapp:+2348121364213 format
+                    to: to,
                     contentSid: TEMPLATE_SID,
                     contentVariables: JSON.stringify({
                         "1": contactCount.toString(),
@@ -159,34 +161,20 @@ async function sendTemplateMessage(to, contactCount, fileId) {
             }
         }
         
-        // Option 2: Try WhatsApp message with button-like formatting
+        // Option 2: Structured WhatsApp message (WORKING FALLBACK)
         console.log('🚀 Attempting structured WhatsApp message...');
-        try {
-            await client.messages.create({
-                from: `whatsapp:${fromNumber}`,
-                to: to,
-                body: `✅ *Your CSV file with ${contactCount} contacts is ready for download!*
+        await client.messages.create({
+            from: `whatsapp:${fromNumber}`,
+            to: to,
+            body: `✅ *Your CSV file with ${contactCount} contacts is ready for download!*
 
 📎 *Download CSV*
 ${downloadUrl}
 
 ⏰ _Link expires in 2 hours_
 💡 _Tap the link above to download your file_`
-            });
-            console.log('✅ Structured WhatsApp message sent!');
-            return;
-        } catch (structuredError) {
-            console.error('❌ Structured message failed:', structuredError.message);
-        }
-        
-        // Option 3: Simple fallback (this should always work)
-        console.log('🚀 Using simple fallback message...');
-        await client.messages.create({
-            from: `whatsapp:${fromNumber}`,
-            to: to,
-            body: `Your CSV file with ${contactCount} contacts is ready!\n\nDownload: ${downloadUrl}\n\nExpires in 2 hours.`
         });
-        console.log('✅ Simple fallback message sent!');
+        console.log('✅ Structured WhatsApp message sent!');
         
     } catch (finalError) {
         console.error('❌ All template methods failed:', finalError.message);
@@ -194,7 +182,7 @@ ${downloadUrl}
     }
 }
 
-// Enhanced Twilio webhook with multi-file support and fixed parsing
+// Enhanced Twilio webhook with multi-file support and fixed URL generation
 app.post('/webhook', async (req, res) => {
     const { Body, From, NumMedia } = req.body;
     
@@ -298,7 +286,7 @@ app.post('/webhook', async (req, res) => {
             twiml.message(statusMessage);
             
         } else if (Body === '1️⃣' || Body === '1') {
-            // Export current batch with enhanced template support
+            // Export current batch with FIXED URL generation
             const batch = await storage.get(`batch:${From}`);
             
             if (!batch || batch.contacts.length === 0) {
@@ -311,8 +299,10 @@ app.post('/webhook', async (req, res) => {
             // Generate CSV from batch
             const csv = generateCSV(batch.contacts);
             
-            // Create secure file
-            const fileId = uuidv4();
+            // Create secure file with clean UUID
+            const fileId = uuidv4(); // Just the UUID, nothing else
+            
+            console.log(`📝 Creating file with clean ID: ${fileId}`);
             
             await storage.set(`file:${fileId}`, {
                 content: csv,
@@ -330,6 +320,7 @@ app.post('/webhook', async (req, res) => {
             } catch (templateError) {
                 console.error('❌ Template failed, using TwiML fallback:', templateError);
                 
+                // Fixed fallback with clean URL
                 const downloadUrl = `${BASE_URL}/download/${fileId}`;
                 twiml.message(`✅ **Your CSV file with ${batch.contacts.length} contacts is ready!**
 
@@ -392,6 +383,7 @@ _Standing by for your contact packages..._`);
 🟢 Universal Parser: READY
 🟢 Text Parsing: ENHANCED
 🟢 Template Messages: ACTIVE
+🟢 Download URLs: FIXED
 🟢 Batch System: ACTIVE
 🟢 Storage: ${redisClient ? 'REDIS' : 'MEMORY'}
 🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}
@@ -402,7 +394,7 @@ _Standing by for your contact packages..._`);
 _Ready to receive contact packages!_`);
             
         } else if (Body.toLowerCase() === 'testtemplate') {
-            // Test template functionality
+            // Test template functionality with clean URL
             try {
                 const testFileId = 'test-' + Date.now();
                 await sendTemplateMessage(From, 5, testFileId);
@@ -448,10 +440,13 @@ app.get('/download/:fileId', async (req, res) => {
     const { fileId } = req.params;
     
     try {
+        console.log(`📥 Download request for file: ${fileId}`);
+        
         // Get file data
         const fileData = await storage.get(`file:${fileId}`);
         
         if (!fileData) {
+            console.log(`❌ File not found: ${fileId}`);
             return res.status(404).send(`
                 <!DOCTYPE html>
                 <html>
@@ -495,7 +490,7 @@ app.get('/download/:fileId', async (req, res) => {
         res.setHeader('Content-Disposition', `attachment; filename="${fileData.filename}"`);
         res.send(fileData.content);
         
-        console.log(`📥 File downloaded: ${fileId} (${fileData.contactCount || 0} contacts)`);
+        console.log(`📥 File downloaded successfully: ${fileId} (${fileData.contactCount || 0} contacts)`);
         
     } catch (error) {
         console.error('Download error:', error);
@@ -538,22 +533,23 @@ app.get('/', async (req, res) => {
                 <h2>Status: ✅ OPERATIONAL</h2>
                 
                 <div class="status">
-                    <h3>Enhanced Features</h3>
+                    <h3>Fixed Features</h3>
                     <div class="metric"><span>Multi-file Processing:</span><strong>✅ Active</strong></div>
                     <div class="metric"><span>Universal Parser:</span><strong>✅ VCF, CSV, Excel, PDF, Text</strong></div>
-                    <div class="metric"><span>Template Messages:</span><strong>✅ Enhanced with Fallbacks</strong></div>
-                    <div class="metric"><span>Text Parsing:</span><strong>✅ Fixed & Enhanced</strong></div>
+                    <div class="metric"><span>Template Messages:</span><strong>✅ Fixed Phone Format</strong></div>
+                    <div class="metric"><span>Download URLs:</span><strong>✅ Fixed Double-Nesting</strong></div>
+                    <div class="metric"><span>Text Parsing:</span><strong>✅ Enhanced (4 Methods)</strong></div>
                     <div class="metric"><span>Batch System:</span><strong>✅ Active</strong></div>
                     <div class="metric"><span>Storage:</span><strong>${redisClient ? 'Redis Cloud' : 'In-Memory'}</strong></div>
                     <div class="metric"><span>Active Files:</span><strong>${fileCount}</strong></div>
                 </div>
                 
-                <h3>Recent Fixes</h3>
+                <h3>Latest Fixes</h3>
                 <ul>
-                    <li>✅ Fixed template download buttons with multiple fallbacks</li>
-                    <li>✅ Enhanced text parsing with pattern recognition</li>
-                    <li>✅ Improved error reporting for failed files</li>
-                    <li>✅ Added testtemplate command for debugging</li>
+                    <li>✅ Fixed download URL double-nesting issue</li>
+                    <li>✅ Clean fileId generation and URL creation</li>
+                    <li>✅ Enhanced debug logging for troubleshooting</li>
+                    <li>✅ Proper template message phone formatting</li>
                 </ul>
                 
                 <h3>Test Commands</h3>
@@ -606,14 +602,14 @@ async function getActiveFileCount() {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('🚀 OPERATION: PARSE STORM V2 - ENHANCED SYSTEMS ONLINE');
+    console.log('🚀 OPERATION: PARSE STORM V2 - DOWNLOAD URLS FIXED');
     console.log(`📡 Listening on PORT: ${PORT}`);
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected' : 'In-Memory Mode'}`);
     console.log(`🌐 Base URL: ${BASE_URL}`);
     console.log(`🎯 Template SID: ${TEMPLATE_SID || 'Not configured'}`);
     console.log('\n📋 Enhanced multi-file webhook ready at: POST /webhook');
-    console.log('🔧 New features: Enhanced templates, improved text parsing, better error handling');
+    console.log('🔧 Fixed: Download URL double-nesting, template phone format, enhanced error handling');
 });
 
 // Cleanup expired files every 30 minutes
