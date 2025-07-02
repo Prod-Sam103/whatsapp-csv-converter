@@ -1,4 +1,16 @@
-const express = require('express');
+    } else if (contentType.includes('text/csv') || contentType.includes('application/csv')) {
+        // CSV file - use new parser
+        console.log('📊 Detected CSV file');
+        return parseContactFile(fileBuffer, 'contacts.csv');
+    } else if (contentType.includes('application/pdf')) {
+        // PDF file - use new parser
+        console.log('📄 Detected PDF file');
+        return await parseContactFile(fileBuffer, 'contacts.pdf');
+    } else if (contentType.includes('text/plain')) {
+        // Text file - use new parser
+        console.log('📝 Detected text file');
+        return parseContactFile(fileBuffer, 'contacts.txt');
+    } else if (contentType.includes('application/pdf')) {const express = require('express');
 const twilio = require('twilio');
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
@@ -38,14 +50,18 @@ if (IS_PRODUCTION && process.env.REDIS_URL) {
                 <h2>Status: ✅ OPERATIONAL (Universal File Parser)</h2>
                 
                 <div class="v2-features">
-                    <h3>🚀 V2 Features</h3>
+                    <h3>🚀 V2 Universal Parser Features</h3>
                     <ul>
                         <li>📇 VCF (Contact Cards)</li>
                         <li>📊 CSV Files</li>
                         <li>📗 Excel Files (.xlsx, .xls)</li>
+                        <li>📄 PDF Documents</li>
+                        <li>📝 Text Files</li>
                         <li>🤖 Auto-column detection</li>
+                        <li>🔍 Pattern-based text extraction</li>
                         <li>📱 Nigerian phone formatting</li>
                         <li>🎯 Sugar CRM format output</li>
+                        <li>💬 Unstructured text parsing</li>
                     </ul>
                 </div>
                 
@@ -69,7 +85,7 @@ if (IS_PRODUCTION && process.env.REDIS_URL) {
                     </div>
                     <div class="metric">
                         <span>Parsers:</span>
-                        <strong>VCF + CSV + Excel</strong>
+                        <strong>VCF + CSV + Excel + PDF + Text</strong>
                     </div>
                     <div class="metric">
                         <span>Uptime:</span>
@@ -80,17 +96,19 @@ if (IS_PRODUCTION && process.env.REDIS_URL) {
                 <h3>How to Use V2</h3>
                 <ol>
                     <li>Send contact files to +16466030424</li>
-                    <li>Supported: VCF, CSV, Excel (.xlsx, .xls)</li>
+                    <li>Supported: VCF, CSV, Excel, PDF, Text</li>
                     <li>Files accumulate in batches</li>
                     <li>Tap 1️⃣ to export or 2️⃣ to keep adding</li>
                     <li>Download Sugar-formatted CSV</li>
                 </ol>
                 
-                <h3>Supported Column Names</h3>
+                <h3>Smart Parsing Features</h3>
                 <ul>
-                    <li><strong>Name:</strong> name, full name, contact name, person, etc.</li>
-                    <li><strong>Phone:</strong> phone, mobile, cell, telephone, whatsapp, etc.</li>
-                    <li><strong>Email:</strong> email, e-mail, mail, email address, etc.</li>
+                    <li><strong>Auto-detection:</strong> Recognizes various column names and formats</li>
+                    <li><strong>Text extraction:</strong> Finds contacts in unstructured text</li>
+                    <li><strong>Pattern matching:</strong> Extracts emails and phones automatically</li>
+                    <li><strong>PDF support:</strong> Reads contact data from PDF documents</li>
+                    <li><strong>Bulk processing:</strong> Handles multiple files in one batch</li>
                 </ul>
                 
                 <p style="margin-top: 2rem; color: #666; text-align: center;">
@@ -123,12 +141,15 @@ app.listen(PORT, () => {
     console.log(`🚫 Testing Mode: Only authorized numbers can access`);
     console.log(`✅ Authorized Numbers: ${AUTHORIZED_NUMBERS.join(', ')}`);
     console.log('\n📋 Webhook ready at: POST /webhook');
-    console.log('\n🚀 V2 Features:');
+    console.log('\n🚀 V2 Universal Parser Features:');
     console.log('   📇 VCF Parser: Enhanced multi-contact support');
     console.log('   📊 CSV Parser: Auto-column detection');
     console.log('   📗 Excel Parser: .xlsx and .xls support');
+    console.log('   📄 PDF Parser: Text extraction from documents');
+    console.log('   📝 Text Parser: Pattern-based contact extraction');
     console.log('   🤖 Smart column mapping');
     console.log('   📱 Nigerian phone formatting');
+    console.log('   🔍 Unstructured text parsing');
 });
 
 // Cleanup expired files every 30 minutes
@@ -279,11 +300,11 @@ async function parseContactMedia(mediaUrl, req) {
                 return parseVCF(vcfContent);
             }
         } catch (vcfError) {
-            console.log('❓ VCF parsing failed, trying CSV...');
+            console.log('❓ VCF parsing failed, trying text parsing...');
             try {
-                return parseContactFile(fileBuffer, 'contacts.csv');
-            } catch (csvError) {
-                throw new Error('Unsupported file format. Please send VCF, CSV, or Excel files.');
+                return parseContactFile(fileBuffer, 'contacts.txt');
+            } catch (textError) {
+                throw new Error('Unsupported file format. Please send VCF, CSV, Excel, PDF, or text files.');
             }
         }
     }
@@ -322,7 +343,7 @@ app.post('/webhook', async (req, res) => {
                 console.log('🔍 Parsed contacts:', newContacts.length);
                 
                 if (newContacts.length === 0) {
-                    twiml.message(`❌ No contacts found in the file.\n\nSupported formats: VCF, CSV, Excel (.xlsx, .xls)\nRequired: Name or Phone number`);
+                    twiml.message(`❌ No contacts found in the file.\n\nSupported formats: VCF, CSV, Excel, PDF, Text\nRequired: Name or Phone number`);
                     res.type('text/xml');
                     res.send(twiml.toString());
                     return;
@@ -343,7 +364,7 @@ Tap 1️⃣ to export • 2️⃣ to keep adding`);
                 
             } catch (parseError) {
                 console.error('❌ File parsing error:', parseError);
-                twiml.message(`❌ Could not parse file: ${parseError.message}\n\nSupported formats:\n📇 VCF (contacts)\n📊 CSV files\n📗 Excel (.xlsx, .xls)\n\nRequired columns: Name or Phone`);
+                twiml.message(`❌ Could not parse file: ${parseError.message}\n\nSupported formats:\n📇 VCF (contacts)\n📊 CSV files\n📗 Excel (.xlsx, .xls)\n📄 PDF documents\n📝 Text files\n\nRequired: Name or Phone number`);
             }
             
         } else if (Body === '1️⃣' || Body === '1') {
@@ -388,14 +409,14 @@ Tap 1️⃣ to export • 2️⃣ to keep adding`);
             
         } else if (Body === '2️⃣' || Body === '2') {
             // Continue adding - just acknowledge
-            twiml.message(`📨 Drop your contact files—let's bulk-load them! 🚀\n\n📇 VCF • 📊 CSV • 📗 Excel supported`);
+            twiml.message(`📨 Drop your contact files—let's bulk-load them! 🚀\n\n📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text supported`);
             
         } else if (Body.toLowerCase() === 'help') {
             const formats = getSupportedFormats();
-            twiml.message(`🎖️ **WhatsApp CSV Converter V2**\n\n📋 **SUPPORTED FILES:**\n📇 VCF (contact cards)\n📊 CSV files\n📗 Excel (.xlsx, .xls)\n\n⚡ **HOW TO USE:**\n1. Send contact files\n2. Accumulate in batches\n3. Tap 1️⃣ to export or 2️⃣ to add more\n4. Get Sugar-formatted CSV\n\n💡 **Required:** Name or Phone number\n💡 **Optional:** Email address\n\n_Send files to get started..._`);
+            twiml.message(`🎖️ **WhatsApp CSV Converter V2**\n\n📋 **SUPPORTED FILES:**\n📇 VCF (contact cards)\n📊 CSV files\n📗 Excel (.xlsx, .xls)\n📄 PDF documents\n📝 Text files\n\n⚡ **HOW TO USE:**\n1. Send contact files\n2. Accumulate in batches\n3. Tap 1️⃣ to export or 2️⃣ to add more\n4. Get Sugar-formatted CSV\n\n💡 **Auto-extracts:** Names, emails, phones\n💡 **Smart parsing:** Works with unstructured text\n\n_Send files to get started..._`);
             
         } else if (Body.toLowerCase() === 'test') {
-            twiml.message(`✅ **Systems Check Complete**\n\n🟢 Bot: OPERATIONAL\n🟢 VCF Parser: ARMED\n🟢 CSV/Excel Parser: READY\n🟢 CSV Generator: READY\n🟢 Storage: ${redisClient ? 'REDIS' : 'MEMORY'}\n🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}\n🟢 Template: ${TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}\n\n_Ready to receive contact files!_`);
+            twiml.message(`✅ **Systems Check Complete**\n\n🟢 Bot: OPERATIONAL\n🟢 VCF Parser: ARMED\n🟢 CSV/Excel Parser: READY\n🟢 PDF Parser: READY\n🟢 Text Parser: READY\n🟢 CSV Generator: READY\n🟢 Storage: ${redisClient ? 'REDIS' : 'MEMORY'}\n🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}\n🟢 Template: ${TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}\n\n_Ready to receive contact files!_`);
             
         } else if (Body.toLowerCase() === 'status') {
             const fileCount = await getActiveFileCount();
@@ -413,16 +434,19 @@ Tap 1️⃣ to export • 2️⃣ to keep adding`);
 📇 VCF contacts
 📊 CSV files
 📗 Excel (.xlsx, .xls)
+📄 PDF documents
+📝 Text files
+🤖 Smart text extraction
 
 Ready to receive contact files!`);
             
         } else if (Body.toLowerCase() === 'formats') {
             const formats = getSupportedFormats();
-            twiml.message(`📋 **Supported File Formats**\n\n✅ ${formats.supported.join(' • ')}\n\n📝 **Required Columns:**\n${formats.requiredColumns}\n\n📧 **Optional Columns:**\n${formats.optionalColumns}\n\n💡 **Auto-detection** for various column names\n💡 **Nigerian phone formatting** included`);
+            twiml.message(`📋 **Supported File Formats**\n\n✅ ${formats.supported.join(' • ')}\n\n📝 **Required Data:**\n${formats.requiredColumns}\n\n📧 **Optional Data:**\n${formats.optionalColumns}\n\n🤖 **Smart Features:**\n• Auto-column detection\n• Pattern-based text extraction\n• Nigerian phone formatting\n• Unstructured text parsing\n\n💡 Can extract contacts from any text!`);
             
         } else {
             // Any other message - prompt for contact files
-            twiml.message(`📨 Drop your contact files—let's bulk-load them! 🚀\n\n📇 VCF • 📊 CSV • 📗 Excel supported\n\nType 'help' for instructions`);
+            twiml.message(`📨 Drop your contact files—let's bulk-load them! 🚀\n\n📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text\n\nType 'help' for instructions`);
         }
         
     } catch (error) {
