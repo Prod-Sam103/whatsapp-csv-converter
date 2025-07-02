@@ -89,6 +89,15 @@ function isAuthorizedNumber(phoneNumber) {
 async function sendTemplateMessage(to, contactCount, urlParam) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
+    console.log('🔍 Template Debug Info:');
+    console.log('Template SID:', TEMPLATE_SID);
+    console.log('Contact Count:', contactCount);
+    console.log('URL Param:', urlParam);
+    console.log('Content Variables:', JSON.stringify({
+        "1": contactCount.toString(),
+        "2": urlParam
+    }));
+    
     try {
         const message = await client.messages.create({
             from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
