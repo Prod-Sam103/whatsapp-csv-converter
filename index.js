@@ -127,21 +127,19 @@ async function parseContactMedia(mediaUrl, req) {
     }
 }
 
-// FIXED: Template Message Function with correct URL generation
+// FIXED: Template Message Function with WhatsApp-safe URLs
 async function sendTemplateMessage(to, contactCount, fileId) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
-    // FIX: Ensure fileId is clean and create proper URL
+    // FIX: Use shorter /get/ URL to avoid WhatsApp mangling
     const cleanFileId = typeof fileId === 'string' ? fileId.split('/').pop() : fileId;
-    const downloadUrl = `${BASE_URL}/download/${cleanFileId}`;
+    const downloadUrl = `${BASE_URL}/get/${cleanFileId}`;
     
     console.log(`🚀 Template message - FileID: ${cleanFileId}, URL: ${downloadUrl}`);
     
-    // Use your Twilio WhatsApp number (clean format)
     const fromNumber = '+16466030424';
     
     try {
-        // Option 1: Use WhatsApp Business Template (if configured)
         if (TEMPLATE_SID) {
             console.log('🚀 Attempting WhatsApp Business Template...');
             try {
@@ -161,7 +159,6 @@ async function sendTemplateMessage(to, contactCount, fileId) {
             }
         }
         
-        // Option 2: Structured WhatsApp message (WORKING FALLBACK)
         console.log('🚀 Attempting structured WhatsApp message...');
         await client.messages.create({
             from: `whatsapp:${fromNumber}`,
@@ -182,7 +179,7 @@ ${downloadUrl}
     }
 }
 
-// Enhanced Twilio webhook with multi-file support and fixed URL generation
+// Enhanced Twilio webhook with multi-file support
 app.post('/webhook', async (req, res) => {
     const { Body, From, NumMedia } = req.body;
     
@@ -202,7 +199,7 @@ app.post('/webhook', async (req, res) => {
             return;
         }
         
-        // MULTIPLE CONTACT FILES DETECTED - Enhanced with better error handling
+        // MULTIPLE CONTACT FILES DETECTED
         if (NumMedia > 0) {
             console.log(`📎 ${NumMedia} contact file(s) detected`);
             
@@ -286,7 +283,7 @@ app.post('/webhook', async (req, res) => {
             twiml.message(statusMessage);
             
         } else if (Body === '1️⃣' || Body === '1') {
-            // Export current batch with FIXED URL generation
+            // Export current batch
             const batch = await storage.get(`batch:${From}`);
             
             if (!batch || batch.contacts.length === 0) {
@@ -300,7 +297,7 @@ app.post('/webhook', async (req, res) => {
             const csv = generateCSV(batch.contacts);
             
             // Create secure file with clean UUID
-            const fileId = uuidv4(); // Just the UUID, nothing else
+            const fileId = uuidv4();
             
             console.log(`📝 Creating file with clean ID: ${fileId}`);
             
@@ -320,8 +317,8 @@ app.post('/webhook', async (req, res) => {
             } catch (templateError) {
                 console.error('❌ Template failed, using TwiML fallback:', templateError);
                 
-                // Fixed fallback with clean URL
-                const downloadUrl = `${BASE_URL}/download/${fileId}`;
+                // Fixed fallback with /get/ URL
+                const downloadUrl = `${BASE_URL}/get/${fileId}`;
                 twiml.message(`✅ **Your CSV file with ${batch.contacts.length} contacts is ready!**
 
 📎 *Download CSV*
@@ -365,7 +362,7 @@ Drop your contact files—let's bulk-load them! 🚀
 ✅ Batch collection system
 ✅ Universal format support
 ✅ Smart text extraction
-✅ Template download buttons
+✅ WhatsApp-safe download links
 
 💡 **TIPS:**
 • Send multiple files together
@@ -383,7 +380,7 @@ _Standing by for your contact packages..._`);
 🟢 Universal Parser: READY
 🟢 Text Parsing: ENHANCED
 🟢 Template Messages: ACTIVE
-🟢 Download URLs: FIXED
+🟢 Download URLs: WHATSAPP-SAFE
 🟢 Batch System: ACTIVE
 🟢 Storage: ${redisClient ? 'REDIS' : 'MEMORY'}
 🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}
@@ -394,7 +391,7 @@ _Standing by for your contact packages..._`);
 _Ready to receive contact packages!_`);
             
         } else if (Body.toLowerCase() === 'testtemplate') {
-            // Test template functionality with clean URL
+            // Test template functionality
             try {
                 const testFileId = 'test-' + Date.now();
                 await sendTemplateMessage(From, 5, testFileId);
@@ -433,6 +430,16 @@ Please try again or contact support.
     
     res.type('text/xml');
     res.send(twiml.toString());
+});
+
+// WhatsApp-safe redirect endpoint (NEW)
+app.get('/get/:fileId', async (req, res) => {
+    const { fileId } = req.params;
+    
+    console.log(`🔗 WhatsApp redirect request for file: ${fileId}`);
+    
+    // Just redirect to the actual download
+    res.redirect(301, `/download/${fileId}`);
 });
 
 // Download endpoint (no password for simplicity)
@@ -537,7 +544,7 @@ app.get('/', async (req, res) => {
                     <div class="metric"><span>Multi-file Processing:</span><strong>✅ Active</strong></div>
                     <div class="metric"><span>Universal Parser:</span><strong>✅ VCF, CSV, Excel, PDF, Text</strong></div>
                     <div class="metric"><span>Template Messages:</span><strong>✅ Fixed Phone Format</strong></div>
-                    <div class="metric"><span>Download URLs:</span><strong>✅ Fixed Double-Nesting</strong></div>
+                    <div class="metric"><span>Download URLs:</span><strong>✅ WhatsApp-Safe Redirect</strong></div>
                     <div class="metric"><span>Text Parsing:</span><strong>✅ Enhanced (4 Methods)</strong></div>
                     <div class="metric"><span>Batch System:</span><strong>✅ Active</strong></div>
                     <div class="metric"><span>Storage:</span><strong>${redisClient ? 'Redis Cloud' : 'In-Memory'}</strong></div>
@@ -546,8 +553,8 @@ app.get('/', async (req, res) => {
                 
                 <h3>Latest Fixes</h3>
                 <ul>
-                    <li>✅ Fixed download URL double-nesting issue</li>
-                    <li>✅ Clean fileId generation and URL creation</li>
+                    <li>✅ Added WhatsApp-safe redirect endpoint (/get/)</li>
+                    <li>✅ Fixed URL mangling with shorter redirect URLs</li>
                     <li>✅ Enhanced debug logging for troubleshooting</li>
                     <li>✅ Proper template message phone formatting</li>
                 </ul>
@@ -602,14 +609,14 @@ async function getActiveFileCount() {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('🚀 OPERATION: PARSE STORM V2 - DOWNLOAD URLS FIXED');
+    console.log('🚀 OPERATION: PARSE STORM V2 - WHATSAPP-SAFE URLS');
     console.log(`📡 Listening on PORT: ${PORT}`);
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected' : 'In-Memory Mode'}`);
     console.log(`🌐 Base URL: ${BASE_URL}`);
     console.log(`🎯 Template SID: ${TEMPLATE_SID || 'Not configured'}`);
     console.log('\n📋 Enhanced multi-file webhook ready at: POST /webhook');
-    console.log('🔧 Fixed: Download URL double-nesting, template phone format, enhanced error handling');
+    console.log('🔧 Fixed: WhatsApp URL mangling with /get/ redirect endpoint');
 });
 
 // Cleanup expired files every 30 minutes
