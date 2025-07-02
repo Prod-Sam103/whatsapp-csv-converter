@@ -403,19 +403,21 @@ _Ready to receive contact packages!_`);
             
         } else {
             // Enhanced welcome message
-            twiml.message(`👋 **Welcome to Contact Converter V2!**
+            twiml.message(`👋 **Welcome to Contact Converter!**
 
 📨 Drop your contact files—let's bulk-load them! 🚀
 
 📁 **Supported Formats:**
-📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text
+📇 VCF (your contact via your phone book) 
+• 📊 CSV 
+• 📗 Excel 
+• 📄 PDF 
+• 📝 Text
 
 💡 **Send multiple files at once for faster processing**
 
 **Commands:**
-• Type *help* for detailed instructions
-• Type *test* for system status
-• Type *testtemplate* to test download buttons`);
+• Type *help* for detailed instructions`);
         }
         
     } catch (error) {
