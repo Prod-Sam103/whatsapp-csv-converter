@@ -85,35 +85,83 @@ function isAuthorizedNumber(phoneNumber) {
     return AUTHORIZED_NUMBERS.includes(cleanNumber);
 }
 
-// Send template message with download button
-async function sendTemplateMessage(to, contactCount, urlParam) {
+// Send template message with download button - ENHANCED DEBUG VERSION
+async function sendTemplateMessage(to, contactCount, fileId) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
-    console.log('🔍 Template Debug Info:');
+    console.log('🔍 COMPREHENSIVE Template Debug:');
     console.log('Template SID:', TEMPLATE_SID);
     console.log('Contact Count:', contactCount);
-    console.log('URL Param:', urlParam);
-    console.log('Content Variables:', JSON.stringify({
+    console.log('File ID:', fileId);
+    console.log('Account SID:', process.env.TWILIO_ACCOUNT_SID?.substring(0, 10) + '...');
+    console.log('Auth Token set:', !!process.env.TWILIO_AUTH_TOKEN);
+    console.log('WhatsApp Number:', process.env.TWILIO_WHATSAPP_NUMBER);
+    console.log('From (to):', to);
+    
+    const contentVariables = {
         "1": contactCount.toString(),
-        "2": urlParam
-    }));
+        "2": fileId
+    };
+    
+    console.log('Content Variables JSON:', JSON.stringify(contentVariables));
     
     try {
+        console.log('🚀 Attempting to send template message...');
+        
         const message = await client.messages.create({
             from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
             to: to,
             contentSid: TEMPLATE_SID,
-            contentVariables: JSON.stringify({
-                "1": contactCount.toString(),
-                "2": urlParam  // This will be fileId?p=password
-            })
+            contentVariables: JSON.stringify(contentVariables)
         });
         
-        console.log(`📤 Template message sent: ${message.sid}`);
+        console.log(`📤 Template message sent successfully!`);
+        console.log('Message SID:', message.sid);
+        console.log('Message Status:', message.status);
         return message;
     } catch (error) {
-        console.error('❌ Template send error:', error);
+        console.error('❌ DETAILED Template Error:');
+        console.error('Error Message:', error.message);
+        console.error('Error Code:', error.code);
+        console.error('Error Status:', error.status);
+        console.error('More Info:', error.moreInfo);
+        console.error('Full Error:', error);
         throw error;
+    }
+}
+
+// Test template with different approaches
+async function testTemplate(to) {
+    console.log('🧪 TESTING TEMPLATE WITH MULTIPLE APPROACHES');
+    
+    // Test 1: Simple variables
+    try {
+        console.log('Test 1: Simple variables');
+        await sendTemplateMessage(to, 1, 'test123');
+        return 'Test 1 successful';
+    } catch (error) {
+        console.log('Test 1 failed:', error.message);
+    }
+    
+    // Test 2: Different variable format
+    try {
+        console.log('Test 2: Different URL format');
+        await sendTemplateMessage(to, 5, 'abc123?p=456789');
+        return 'Test 2 successful';
+    } catch (error) {
+        console.log('Test 2 failed:', error.message);
+    }
+    
+    // Test 3: Check if template exists
+    try {
+        console.log('Test 3: Template existence check');
+        const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        const template = await client.content.v1.contents(TEMPLATE_SID).fetch();
+        console.log('Template found:', template.friendlyName, template.language);
+        return 'Test 3 successful - template exists';
+    } catch (error) {
+        console.log('Test 3 failed - template not found:', error.message);
+        return 'Template does not exist or access denied';
     }
 }
 
@@ -138,8 +186,42 @@ app.post('/webhook', async (req, res) => {
             return;
         }
         
+        // TEMPLATE TESTING COMMANDS
+        if (Body.toLowerCase() === 'testtemplate') {
+            console.log('🧪 Template test requested');
+            if (TEMPLATE_SID) {
+                try {
+                    const result = await testTemplate(From);
+                    twiml.message(`✅ Template test result: ${result}`);
+                } catch (error) {
+                    twiml.message(`❌ Template test failed: ${error.message}`);
+                }
+            } else {
+                twiml.message('❌ No template SID configured');
+            }
+            
+        } else if (Body.toLowerCase() === 'simpletemplate') {
+            // Test with the simplest possible template call
+            if (TEMPLATE_SID) {
+                try {
+                    await sendTemplateMessage(From, 1, 'test');
+                    twiml.message('✅ Simple template test sent');
+                } catch (error) {
+                    twiml.message(`❌ Simple template failed: ${error.message}`);
+                }
+            } else {
+                twiml.message('❌ No template SID configured');
+            }
+            
+        } else if (Body.toLowerCase() === 'templateinfo') {
+            // Show template configuration info
+            twiml.message(`📋 Template Info:
+SID: ${TEMPLATE_SID || 'Not set'}
+Account: ${process.env.TWILIO_ACCOUNT_SID?.substring(0, 15)}...
+WhatsApp #: ${process.env.TWILIO_WHATSAPP_NUMBER}`);
+            
         // CONTACT PACKAGE DETECTED
-        if (NumMedia > 0 && MediaUrl0) {
+        } else if (NumMedia > 0 && MediaUrl0) {
             console.log('📎 Contact package detected:', MediaUrl0);
             
             // Get existing batch or create new one
@@ -202,8 +284,16 @@ Tap 1️⃣ to export • 2️⃣ to keep adding`);
             
             const downloadUrl = `${BASE_URL}/download/${fileId}`;
             
-            // Send download message
-            twiml.message(`✅ *CSV Ready!*\n\n📊 Processed: ${batch.contacts.length} contacts\n📎 Download: ${downloadUrl}\n⏰ Expires: 2 hours\n\n💡 _Tap the link to download your CSV file_`);
+            // TRY TEMPLATE FIRST, THEN FALLBACK
+            try {
+                console.log('🚀 Attempting template message for CSV download...');
+                await sendTemplateMessage(From, batch.contacts.length, fileId);
+                console.log('✅ Template message sent successfully!');
+            } catch (templateError) {
+                console.error('❌ Template failed, using fallback:', templateError);
+                // Enhanced fallback message
+                twiml.message(`✅ *CSV Ready!*\n\n📊 Processed: ${batch.contacts.length} contacts\n📎 Download: ${downloadUrl}\n⏰ Expires: 2 hours\n\n💡 _Tap the link to download your CSV file_`);
+            }
             
             // Clear batch after export
             await storage.del(`batch:${From}`);
@@ -213,7 +303,7 @@ Tap 1️⃣ to export • 2️⃣ to keep adding`);
             twiml.message(`📨 Drop your contact cards—let's bulk-load them! 🚀`);
             
         } else if (Body.toLowerCase() === 'help') {
-            twiml.message(`🎖️ **WhatsApp CSV Converter**\n\n📋 **HOW TO USE:**\n1. Tap attachment (📎)\n2. Select "Contact" \n3. Choose contacts (up to 250)\n4. Send to this number\n5. Get download button\n\n⚡ **FEATURES:**\n- Instant CSV conversion\n- Nigerian numbers auto-formatted\n- Secure downloads\n- Password protection\n\n_Send contacts to get started..._`);
+            twiml.message(`🎖️ **WhatsApp CSV Converter - Template Testing**\n\n📋 **COMMANDS:**\n• testtemplate - Test template functionality\n• simpletemplate - Simple template test\n• templateinfo - Show template config\n• help - This help\n• status - System status\n\n📎 **Normal usage:** Send contacts to test batching\n\n🧪 **Testing Mode Active**`);
             
         } else if (Body.toLowerCase() === 'test') {
             twiml.message(`✅ **Systems Check Complete**\n\n🟢 Bot: OPERATIONAL\n🟢 Parser: ARMED\n🟢 CSV Generator: READY\n🟢 Storage: ${redisClient ? 'REDIS' : 'MEMORY'}\n🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}\n🟢 Template: ${TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}\n\n_Ready to receive contact packages!_`);
@@ -229,11 +319,17 @@ Tap 1️⃣ to export • 2️⃣ to keep adding`);
 🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}
 🟢 Template: ${TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}
 
+🧪 **Template Testing Mode**
+Type 'testtemplate' to debug templates
+
 Ready to receive contact packages!`);
             
         } else {
             // Any other message - prompt for contacts
-            twiml.message(`📨 Drop your contact cards—let's bulk-load them! 🚀`);
+            twiml.message(`📨 Drop your contact cards—let's bulk-load them! 🚀
+
+🧪 **Template Testing Active**
+Commands: testtemplate, simpletemplate, templateinfo`);
         }
         
     } catch (error) {
@@ -339,7 +435,7 @@ app.get('/', async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>WhatsApp CSV Converter</title>
+            <title>WhatsApp CSV Converter - Template Testing</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 body {
@@ -369,12 +465,24 @@ app.get('/', async (req, res) => {
                     border-bottom: 1px solid #eee;
                 }
                 .metric:last-child { border-bottom: none; }
+                .testing {
+                    background: #fff3cd;
+                    border: 1px solid #ffeaa7;
+                    padding: 1rem;
+                    border-radius: 5px;
+                    margin: 1rem 0;
+                }
             </style>
         </head>
         <body>
             <div class="container">
                 <h1>🎖️ WhatsApp CSV Converter</h1>
-                <h2>Status: ✅ OPERATIONAL (Testing Mode)</h2>
+                <h2>Status: ✅ OPERATIONAL (Template Testing Mode)</h2>
+                
+                <div class="testing">
+                    <h3>🧪 Template Testing Mode Active</h3>
+                    <p>This branch includes enhanced template debugging and testing commands.</p>
+                </div>
                 
                 <div class="status">
                     <h3>System Metrics</h3>
@@ -396,7 +504,7 @@ app.get('/', async (req, res) => {
                     </div>
                     <div class="metric">
                         <span>Testing Mode:</span>
-                        <strong>Restricted to authorized numbers</strong>
+                        <strong>Template debugging enabled</strong>
                     </div>
                     <div class="metric">
                         <span>Uptime:</span>
@@ -404,17 +512,24 @@ app.get('/', async (req, res) => {
                     </div>
                 </div>
                 
+                <h3>Template Testing Commands</h3>
+                <ul>
+                    <li><code>testtemplate</code> - Comprehensive template testing</li>
+                    <li><code>simpletemplate</code> - Simple template test</li>
+                    <li><code>templateinfo</code> - Show template configuration</li>
+                    <li><code>status</code> - System status with template info</li>
+                </ul>
+                
                 <h3>How to Use</h3>
                 <ol>
                     <li>Send a WhatsApp message to +16466030424</li>
-                    <li>Share contacts using the attachment button</li>
-                    <li>Accumulate contacts in batches</li>
-                    <li>Tap 1️⃣ to export or 2️⃣ to keep adding</li>
-                    <li>Download your CSV file</li>
+                    <li>Use template testing commands to debug</li>
+                    <li>Share contacts to test normal flow</li>
+                    <li>Verify template integration works</li>
                 </ol>
                 
                 <p style="margin-top: 2rem; color: #666; text-align: center;">
-                    Built with ❤️ for easy contact management
+                    Built with ❤️ for easy contact management - Template Testing Branch
                 </p>
             </div>
         </body>
@@ -434,15 +549,20 @@ app.use((err, req, res, next) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('🚀 OPERATION: BATCH STORM - SYSTEMS ONLINE');
+    console.log('🚀 OPERATION: TEMPLATE TESTING - SYSTEMS ONLINE');
     console.log(`📡 Listening on PORT: ${PORT}`);
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected' : 'In-Memory Mode'}`);
     console.log(`🌐 Base URL: ${BASE_URL}`);
     console.log(`📋 Template SID: ${TEMPLATE_SID || 'NOT CONFIGURED'}`);
+    console.log(`🧪 Template Testing Mode: ACTIVE`);
     console.log(`🚫 Testing Mode: Only authorized numbers can access`);
     console.log(`✅ Authorized Numbers: ${AUTHORIZED_NUMBERS.join(', ')}`);
     console.log('\n📋 Webhook ready at: POST /webhook');
+    console.log('\n🧪 Template testing commands available:');
+    console.log('   - testtemplate');
+    console.log('   - simpletemplate');
+    console.log('   - templateinfo');
 });
 
 // Cleanup expired files every 30 minutes
