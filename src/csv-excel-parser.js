@@ -1,474 +1,536 @@
-// src/csv-excel-parser.js - Universal Contact File Parser with PDF & Text Support
-const XLSX = require('xlsx');
-const Papa = require('papaparse');
-const pdf = require('pdf-parse');
+// src/csv-excel-parser.js - Universal Contact File Parser V2
+// Enhanced with multi-format support and improved text parsing
 
-// Column name variations for auto-detection
-const COLUMN_MAPPINGS = {
-    name: [
-        'name', 'full name', 'fullname', 'contact name', 'contact', 'person',
-        'first name', 'firstname', 'last name', 'lastname', 'display name',
-        'customer name', 'client name', 'title', 'contact_name', 'full_name',
-        'nome', 'nom', 'name_full', 'display_name', 'person_name', 'client',
-        'customer', 'lead', 'prospect', 'member', 'attendee', 'participant'
-    ],
-    email: [
-        'email', 'email address', 'e-mail', 'mail', 'electronic mail',
-        'email_address', 'e_mail', 'contact email', 'primary email',
-        'work email', 'business email', 'personal email', 'correo',
-        'email_1', 'email1', 'primary_email', 'contact_email', 'gmail',
-        'yahoo', 'outlook', 'hotmail', 'mail_address'
-    ],
-    phone: [
-        'phone', 'mobile', 'cell', 'telephone', 'phone number', 'mobile number',
-        'cell phone', 'cellular', 'contact number', 'tel', 'telefone', 'telefono',
-        'phone_number', 'mobile_number', 'cell_phone', 'primary_phone',
-        'work phone', 'business phone', 'personal phone', 'phone1', 'mobile1',
-        'contact_phone', 'phone_1', 'mobile_1', 'whatsapp', 'whatsapp number',
-        'tel_number', 'tel_mobile', 'number', 'contact_mobile'
-    ]
-};
+// Main parsing function - routes to appropriate parser based on content type
+async function parseContactFile(fileContent, mediaType = '') {
+    try {
+        console.log(`🔍 Processing file type: ${mediaType}`);
+        console.log(`📏 File size: ${Buffer.isBuffer(fileContent) ? fileContent.length : fileContent.length} bytes`);
+        
+        // Convert buffer to string for text-based formats
+        let content = fileContent;
+        if (Buffer.isBuffer(fileContent)) {
+            content = fileContent.toString('utf8');
+        }
+        
+        // VCF files - highest priority detection
+        if (mediaType.includes('vcard') || mediaType.includes('text/x-vcard') || 
+            content.includes('BEGIN:VCARD')) {
+            console.log('📇 Parsing as VCF format');
+            const { parseVCF } = require('./vcf-parser');
+            return parseVCF(content);
+        }
+        
+        // CSV files
+        if (mediaType.includes('csv') || mediaType.includes('application/csv') ||
+            (content.includes(',') && (content.toLowerCase().includes('name') || 
+             content.toLowerCase().includes('phone') || content.toLowerCase().includes('email')))) {
+            console.log('📊 Parsing as CSV format');
+            return parseCSV(content);
+        }
+        
+        // Excel files
+        if (mediaType.includes('excel') || mediaType.includes('spreadsheet') || 
+            mediaType.includes('vnd.ms-excel') || mediaType.includes('officedocument.spreadsheetml')) {
+            console.log('📗 Parsing as Excel format');
+            return parseExcel(fileContent); // Pass original buffer for Excel
+        }
+        
+        // PDF files
+        if (mediaType.includes('pdf')) {
+            console.log('📄 Parsing as PDF format');
+            return await parsePDF(fileContent); // Pass original buffer for PDF
+        }
+        
+        // Text files - ENHANCED VERSION
+        if (mediaType.includes('text/plain') || mediaType.includes('text/') || 
+            (!mediaType && typeof content === 'string')) {
+            console.log('📝 Parsing as Text format');
+            return parseTextContacts(content);
+        }
+        
+        // Auto-detection for unknown formats
+        console.log('🔄 Unknown format, attempting intelligent detection...');
+        
+        // Check for VCF patterns
+        if (content.includes('BEGIN:VCARD') || content.includes('VCARD')) {
+            console.log('🔍 Auto-detected VCF content');
+            const { parseVCF } = require('./vcf-parser');
+            return parseVCF(content);
+        }
+        
+        // Check for CSV patterns
+        if (content.includes(',') && (content.includes('@') || content.match(/\d{3,}/))) {
+            console.log('🔍 Auto-detected CSV content');
+            return parseCSV(content);
+        }
+        
+        // Fallback to text parsing for everything else
+        console.log('🔍 Fallback to enhanced text parsing');
+        return parseTextContacts(content);
+        
+    } catch (error) {
+        console.error('❌ Parse error:', error);
+        
+        // Final fallback to text parsing
+        try {
+            const textContent = Buffer.isBuffer(fileContent) ? fileContent.toString('utf8') : fileContent;
+            console.log('🆘 Emergency text parsing fallback...');
+            return parseTextContacts(textContent);
+        } catch (finalError) {
+            console.error('💥 All parsing methods failed:', finalError);
+            return [];
+        }
+    }
+}
 
-// Common contact patterns for text extraction
-const CONTACT_PATTERNS = {
-    // Email patterns
-    email: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
-    
-    // Phone patterns (international and Nigerian)
-    phone: /(?:\+?234|0)?[789]\d{9}|\+?\d{10,15}/g,
-    
-    // Name patterns (before email or phone)
-    nameBeforeEmail: /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[-:,]?\s*[A-Za-z0-9._%+-]+@/gm,
-    nameBeforePhone: /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[-:,]?\s*(?:\+?234|0)?[789]\d{9}/gm,
-    
-    // Structured contact blocks
-    contactBlock: /^(.+?)(?:\n|\r\n|$)(?:.*?(?:email|mail|@).*?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}))?(?:.*?(?:phone|mobile|tel|call).*?((?:\+?234|0)?[789]\d{9}|\+?\d{10,15}))?/gim
-};
-
-// Detect file type and parse accordingly
-function parseContactFile(fileBuffer, filename) {
-    console.log('🔍 Parsing contact file:', filename);
-    console.log('🔍 File size:', fileBuffer.length, 'bytes');
-    
-    const fileExtension = filename.toLowerCase().split('.').pop();
-    console.log('🔍 File extension:', fileExtension);
-    
-    let rawData = [];
+// ENHANCED TEXT PARSING FUNCTION - Multiple detection methods
+function parseTextContacts(textContent) {
+    const contacts = [];
     
     try {
-        if (fileExtension === 'csv') {
-            rawData = parseCSV(fileBuffer);
-        } else if (['xlsx', 'xls'].includes(fileExtension)) {
-            rawData = parseExcel(fileBuffer);
-        } else if (fileExtension === 'pdf') {
-            rawData = parsePDF(fileBuffer);
-        } else if (['txt', 'text'].includes(fileExtension)) {
-            rawData = parseText(fileBuffer);
-        } else {
-            // Try to parse as text if unknown format
-            console.log('❓ Unknown extension, trying text parsing...');
-            rawData = parseText(fileBuffer);
+        console.log('📝 Starting enhanced text parsing...');
+        
+        if (!textContent || typeof textContent !== 'string') {
+            console.log('📝 Invalid text content');
+            return contacts;
         }
         
-        console.log('🔍 Raw data rows:', rawData.length);
+        console.log(`📝 Text length: ${textContent.length} characters`);
         
-        if (rawData.length === 0) {
-            throw new Error('No contact data found in file');
+        // Enhanced regex patterns
+        const emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/gi;
+        const phonePattern = /(?:\+?234|0)?[789]\d{9,10}|\+?\d{10,15}/g;
+        const namePattern = /^[A-Z][a-zA-Z\s]{2,40}$/gm;
+        
+        // Method 1: Look for structured contact blocks
+        console.log('📝 Method 1: Searching for structured contact blocks...');
+        const contactBlockPattern = /(?:name|contact)[\s:]*([^\n\r]+)[\s\S]*?(?:phone|mobile|tel)[\s:]*([^\n\r]+)[\s\S]*?(?:email|mail)[\s:]*([^\n\r]+)/gi;
+        
+        let match;
+        let blockCount = 0;
+        while ((match = contactBlockPattern.exec(textContent)) !== null && blockCount < 100) {
+            const contact = {
+                name: cleanText(match[1]),
+                mobile: cleanPhoneNumber(match[2]),
+                email: cleanText(match[3]),
+                passes: 1
+            };
+            
+            if (contact.name || contact.mobile) {
+                contacts.push(contact);
+                blockCount++;
+            }
+        }
+        console.log(`📝 Method 1 found: ${contacts.length} contacts`);
+        
+        // Method 2: Line-by-line analysis if no blocks found
+        if (contacts.length === 0) {
+            console.log('📝 Method 2: Line-by-line analysis...');
+            const lines = textContent.split(/[\n\r]+/).filter(line => line.trim().length > 3);
+            console.log(`📝 Analyzing ${lines.length} lines`);
+            
+            for (const line of lines) {
+                const emailMatch = line.match(emailPattern);
+                const phoneMatch = line.match(phonePattern);
+                
+                if (emailMatch || phoneMatch) {
+                    // Extract name from line
+                    let name = line
+                        .replace(emailPattern, '')
+                        .replace(phonePattern, '')
+                        .replace(/[^\w\s]/g, ' ')
+                        .trim();
+                    
+                    // Clean up name
+                    const nameWords = name.split(/\s+/).filter(word => 
+                        word.length > 1 && 
+                        /^[A-Za-z]/.test(word) && 
+                        !['phone', 'email', 'contact', 'mobile', 'tel', 'call', 'mail'].includes(word.toLowerCase())
+                    );
+                    
+                    if (nameWords.length > 0) {
+                        name = nameWords.slice(0, 3).join(' '); // Max 3 words for name
+                    } else {
+                        name = 'Contact';
+                    }
+                    
+                    const contact = {
+                        name: name,
+                        mobile: phoneMatch ? cleanPhoneNumber(phoneMatch[0]) : '',
+                        email: emailMatch ? emailMatch[0] : '',
+                        passes: 1
+                    };
+                    
+                    if (contact.mobile || contact.email) {
+                        contacts.push(contact);
+                    }
+                }
+            }
+            console.log(`📝 Method 2 found: ${contacts.length} contacts`);
         }
         
-        // Map to Sugar format
-        const contacts = mapToSugarFormat(rawData);
-        console.log('🎯 Mapped to Sugar format:', contacts.length, 'contacts');
+        // Method 3: Extract all patterns and try to match them intelligently
+        if (contacts.length === 0) {
+            console.log('📝 Method 3: Pattern extraction and matching...');
+            const emails = [...textContent.matchAll(emailPattern)].map(m => m[0]);
+            const phones = [...textContent.matchAll(phonePattern)].map(m => m[0]);
+            const names = [...textContent.matchAll(namePattern)].map(m => m[0]);
+            
+            console.log(`📝 Found patterns: ${emails.length} emails, ${phones.length} phones, ${names.length} names`);
+            
+            const cleanPhones = phones.map(phone => cleanPhoneNumber(phone)).filter(p => p);
+            const maxItems = Math.max(emails.length, cleanPhones.length, names.length);
+            
+            for (let i = 0; i < maxItems; i++) {
+                const contact = {
+                    name: names[i] || `Contact ${i + 1}`,
+                    mobile: cleanPhones[i] || '',
+                    email: emails[i] || '',
+                    passes: 1
+                };
+                
+                if (contact.mobile || contact.email) {
+                    contacts.push(contact);
+                }
+            }
+            console.log(`📝 Method 3 found: ${contacts.length} contacts`);
+        }
         
+        // Method 4: Advanced pattern recognition for unstructured text
+        if (contacts.length === 0) {
+            console.log('📝 Method 4: Advanced pattern recognition...');
+            
+            // Look for common contact formats
+            const advancedPatterns = [
+                // Name followed by phone
+                /([A-Z][a-zA-Z\s]{2,30})\s*[:\-]?\s*(\+?[\d\s\-\(\)]{8,20})/g,
+                // Phone followed by name
+                /(\+?[\d\s\-\(\)]{8,20})\s*[:\-]?\s*([A-Z][a-zA-Z\s]{2,30})/g,
+                // Email with possible name
+                /([A-Z][a-zA-Z\s]{2,30})\s*[:\-]?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g
+            ];
+            
+            for (const pattern of advancedPatterns) {
+                let match;
+                while ((match = pattern.exec(textContent)) !== null) {
+                    const isNameFirst = /^[A-Z][a-zA-Z\s]/.test(match[1]);
+                    const contact = {
+                        name: isNameFirst ? match[1].trim() : match[2].trim(),
+                        mobile: isNameFirst ? cleanPhoneNumber(match[2]) : cleanPhoneNumber(match[1]),
+                        email: match[2].includes('@') ? match[2] : '',
+                        passes: 1
+                    };
+                    
+                    if ((contact.name && contact.name !== 'Contact') || contact.mobile || contact.email) {
+                        contacts.push(contact);
+                    }
+                }
+            }
+            console.log(`📝 Method 4 found: ${contacts.length} contacts`);
+        }
+        
+        // Remove duplicates based on phone or email
+        const unique = [];
+        const seen = new Set();
+        
+        for (const contact of contacts) {
+            const key = contact.mobile || contact.email || contact.name;
+            if (key && !seen.has(key)) {
+                seen.add(key);
+                unique.push(contact);
+            }
+        }
+        
+        console.log(`📝 Text parsing complete: ${unique.length} unique contacts extracted`);
+        return unique;
+        
+    } catch (error) {
+        console.error('📝 Text parsing failed:', error);
+        return [];
+    }
+}
+
+// Helper functions for text parsing
+function cleanText(text) {
+    if (!text) return '';
+    return text.trim().replace(/[^\w\s@.-]/g, '').replace(/\s+/g, ' ');
+}
+
+function cleanPhoneNumber(phone) {
+    if (!phone) return '';
+    
+    // Remove all non-digit characters except +
+    let clean = phone.replace(/[^\d+]/g, '');
+    
+    // Skip if too short or too long
+    if (clean.length < 8 || clean.length > 15) return '';
+    
+    // Nigerian number formatting
+    if (clean.match(/^0[789]\d{9}$/)) {
+        return '+234' + clean.substring(1);
+    }
+    if (clean.match(/^234[789]\d{9}$/)) {
+        return '+' + clean;
+    }
+    if (clean.match(/^[789]\d{9}$/)) {
+        return '+234' + clean;
+    }
+    
+    // International formatting
+    if (!clean.startsWith('+') && clean.length >= 10) {
+        return '+' + clean;
+    }
+    
+    return clean;
+}
+
+// CSV parsing function
+function parseCSV(csvContent) {
+    const contacts = [];
+    
+    try {
+        console.log('📊 Starting CSV parsing...');
+        const lines = csvContent.split('\n').filter(line => line.trim());
+        
+        if (lines.length < 2) {
+            console.log('📊 CSV too short, no data rows found');
+            return contacts;
+        }
+        
+        // Parse headers intelligently
+        const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase().replace(/"/g, ''));
+        console.log('📊 CSV headers detected:', headers);
+        
+        // Find column indices intelligently
+        const nameIndex = headers.findIndex(h => 
+            h.includes('name') || h.includes('contact') || h.includes('person') || h.includes('full')
+        );
+        const phoneIndex = headers.findIndex(h => 
+            h.includes('phone') || h.includes('mobile') || h.includes('number') || h.includes('tel') || h.includes('cell')
+        );
+        const emailIndex = headers.findIndex(h => 
+            h.includes('email') || h.includes('mail') || h.includes('@')
+        );
+        
+        console.log(`📊 Column mapping: name=${nameIndex}, phone=${phoneIndex}, email=${emailIndex}`);
+        
+        // Parse data rows
+        for (let i = 1; i < lines.length; i++) {
+            try {
+                const values = parseCSVLine(lines[i]);
+                
+                const contact = {
+                    name: nameIndex >= 0 && values[nameIndex] ? values[nameIndex].trim() : '',
+                    mobile: phoneIndex >= 0 && values[phoneIndex] ? cleanPhoneNumber(values[phoneIndex].trim()) : '',
+                    email: emailIndex >= 0 && values[emailIndex] ? values[emailIndex].trim() : '',
+                    passes: 1
+                };
+                
+                // Only add if we have meaningful data
+                if (contact.name || contact.mobile) {
+                    contacts.push(contact);
+                }
+            } catch (rowError) {
+                console.error(`📊 Error parsing CSV row ${i}:`, rowError);
+                continue;
+            }
+        }
+        
+        console.log(`📊 CSV parsed successfully: ${contacts.length} contacts extracted`);
         return contacts;
         
     } catch (error) {
-        console.error('❌ File parsing error:', error);
-        throw new Error(`Failed to parse ${fileExtension.toUpperCase()} file: ${error.message}`);
-    }
-}
-
-// Parse CSV files
-function parseCSV(fileBuffer) {
-    console.log('📊 Parsing CSV file...');
-    
-    const csvText = fileBuffer.toString('utf8');
-    console.log('📊 CSV preview:', csvText.substring(0, 200));
-    
-    const result = Papa.parse(csvText, {
-        header: true,
-        skipEmptyLines: true,
-        dynamicTyping: true,
-        delimitersToGuess: [',', '\t', '|', ';']
-    });
-    
-    if (result.errors.length > 0) {
-        console.warn('⚠️ CSV parsing warnings:', result.errors);
-    }
-    
-    console.log('📊 CSV headers detected:', result.meta.fields);
-    return result.data;
-}
-
-// Parse Excel files
-function parseExcel(fileBuffer) {
-    console.log('📗 Parsing Excel file...');
-    
-    const workbook = XLSX.read(fileBuffer, {
-        type: 'buffer',
-        cellDates: true,
-        cellNF: false,
-        cellText: false
-    });
-    
-    console.log('📗 Excel sheets:', workbook.SheetNames);
-    
-    // Use first sheet
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-    
-    console.log('📗 Using sheet:', firstSheetName);
-    
-    // Convert to JSON with headers
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-        header: 1,
-        defval: '',
-        blankrows: false
-    });
-    
-    if (jsonData.length < 2) {
-        throw new Error('Excel file must have at least a header row and one data row');
-    }
-    
-    // Convert array format to object format
-    const headers = jsonData[0].map(h => String(h).trim().toLowerCase());
-    console.log('📗 Excel headers:', headers);
-    
-    const dataRows = jsonData.slice(1).map(row => {
-        const obj = {};
-        headers.forEach((header, index) => {
-            obj[header] = row[index] || '';
-        });
-        return obj;
-    });
-    
-    return dataRows;
-}
-
-// Parse PDF files
-async function parsePDF(fileBuffer) {
-    console.log('📄 Parsing PDF file...');
-    
-    try {
-        const pdfData = await pdf(fileBuffer);
-        const textContent = pdfData.text;
-        
-        console.log('📄 PDF text length:', textContent.length);
-        console.log('📄 PDF preview:', textContent.substring(0, 300));
-        
-        // Extract contacts from PDF text
-        return extractContactsFromText(textContent);
-        
-    } catch (error) {
-        console.error('❌ PDF parsing error:', error);
-        throw new Error('Could not extract text from PDF. File may be image-based or corrupted.');
-    }
-}
-
-// Parse plain text files
-function parseText(fileBuffer) {
-    console.log('📝 Parsing text file...');
-    
-    const textContent = fileBuffer.toString('utf8');
-    console.log('📝 Text length:', textContent.length);
-    console.log('📝 Text preview:', textContent.substring(0, 300));
-    
-    return extractContactsFromText(textContent);
-}
-
-// Extract contacts from text content using pattern matching
-function extractContactsFromText(textContent) {
-    console.log('🔍 Extracting contacts from text...');
-    
-    const contacts = [];
-    const lines = textContent.split(/\n|\r\n/).map(line => line.trim()).filter(line => line);
-    
-    // Method 1: Try to parse as CSV-like content first
-    if (textContent.includes(',') || textContent.includes('\t') || textContent.includes('|')) {
-        try {
-            const csvResult = Papa.parse(textContent, {
-                header: true,
-                skipEmptyLines: true,
-                dynamicTyping: true,
-                delimitersToGuess: [',', '\t', '|', ';']
-            });
-            
-            if (csvResult.data && csvResult.data.length > 0) {
-                console.log('🔍 Text parsed as CSV-like structure');
-                return csvResult.data;
-            }
-        } catch (csvError) {
-            console.log('🔍 CSV parsing failed, trying pattern extraction...');
-        }
-    }
-    
-    // Method 2: Pattern-based extraction
-    const emailMatches = [...textContent.matchAll(CONTACT_PATTERNS.email)];
-    const phoneMatches = [...textContent.matchAll(CONTACT_PATTERNS.phone)];
-    
-    console.log('🔍 Found emails:', emailMatches.length);
-    console.log('🔍 Found phones:', phoneMatches.length);
-    
-    // Extract structured contact blocks
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        
-        // Skip empty lines or headers
-        if (!line || line.toLowerCase().includes('name') && line.toLowerCase().includes('email')) {
-            continue;
-        }
-        
-        const contact = {
-            name: '',
-            email: '',
-            phone: ''
-        };
-        
-        // Try to extract from current line and next few lines
-        const contextLines = lines.slice(i, Math.min(i + 3, lines.length)).join(' ');
-        
-        // Extract email from context
-        const emailMatch = contextLines.match(CONTACT_PATTERNS.email);
-        if (emailMatch) {
-            contact.email = emailMatch[0];
-        }
-        
-        // Extract phone from context
-        const phoneMatch = contextLines.match(CONTACT_PATTERNS.phone);
-        if (phoneMatch) {
-            contact.phone = phoneMatch[0];
-        }
-        
-        // Extract name (try multiple strategies)
-        if (contact.email || contact.phone) {
-            // Strategy 1: Current line might be the name
-            if (!line.includes('@') && !line.match(/\d{7,}/)) {
-                contact.name = line.replace(/[^\w\s]/g, '').trim();
-            }
-            
-            // Strategy 2: Look for name pattern before email/phone
-            if (!contact.name) {
-                const nameMatch = line.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
-                if (nameMatch) {
-                    contact.name = nameMatch[1];
-                }
-            }
-            
-            // Strategy 3: Use line before email/phone as name
-            if (!contact.name && i > 0) {
-                const prevLine = lines[i - 1];
-                if (prevLine && !prevLine.includes('@') && !prevLine.match(/\d{7,}/)) {
-                    contact.name = prevLine.replace(/[^\w\s]/g, '').trim();
-                }
-            }
-        }
-        
-        // Add contact if we have meaningful data
-        if (contact.name || contact.email || contact.phone) {
-            contacts.push({
-                name: contact.name,
-                email: contact.email,
-                mobile: contact.phone,
-                passes: 1
-            });
-        }
-    }
-    
-    // Method 3: If structured approach fails, try bulk extraction
-    if (contacts.length === 0) {
-        console.log('🔍 Trying bulk pattern extraction...');
-        
-        // Bulk extract all emails and phones
-        const allEmails = [...textContent.matchAll(CONTACT_PATTERNS.email)].map(m => m[0]);
-        const allPhones = [...textContent.matchAll(CONTACT_PATTERNS.phone)].map(m => m[0]);
-        
-        // Create contacts from bulk data
-        const maxLength = Math.max(allEmails.length, allPhones.length);
-        for (let i = 0; i < maxLength; i++) {
-            const contact = {
-                name: `Contact ${i + 1}`,
-                email: allEmails[i] || '',
-                mobile: allPhones[i] || '',
-                passes: 1
-            };
-            
-            if (contact.email || contact.mobile) {
-                contacts.push(contact);
-            }
-        }
-    }
-    
-    console.log('🔍 Extracted contacts from text:', contacts.length);
-    return contacts;
-}
-
-// Map raw data to Sugar format
-function mapToSugarFormat(rawData) {
-    console.log('🗺️ Mapping to Sugar format...');
-    
-    if (rawData.length === 0) {
+        console.error('📊 CSV parsing failed:', error);
         return [];
     }
+}
+
+// Helper to properly parse CSV lines with quotes and commas
+function parseCSVLine(line) {
+    const values = [];
+    let current = '';
+    let inQuotes = false;
     
-    // Check if data is already in the right format (from text extraction)
-    if (rawData[0] && rawData[0].hasOwnProperty('mobile')) {
-        console.log('🗺️ Data already in Sugar format');
-        return rawData.filter(contact => contact.name || contact.mobile);
-    }
-    
-    // Get headers from first row
-    const headers = Object.keys(rawData[0]).map(h => h.toLowerCase().trim());
-    console.log('🗺️ Available headers:', headers);
-    
-    // Auto-detect column mappings
-    const columnMap = autoDetectColumns(headers);
-    console.log('🗺️ Column mapping:', columnMap);
-    
-    const contacts = [];
-    
-    rawData.forEach((row, index) => {
-        try {
-            const contact = {
-                name: '',
-                mobile: '',
-                email: '',
-                passes: 1
-            };
-            
-            // Extract name
-            if (columnMap.name) {
-                contact.name = cleanText(row[columnMap.name]);
-            }
-            
-            // Extract email
-            if (columnMap.email) {
-                contact.email = cleanEmail(row[columnMap.email]);
-            }
-            
-            // Extract phone
-            if (columnMap.phone) {
-                contact.mobile = cleanPhone(row[columnMap.phone]);
-            }
-            
-            // Only add if we have at least name or phone
-            if (contact.name || contact.mobile) {
-                contacts.push(contact);
-                console.log(`🗺️ Row ${index + 1}: ${contact.name} - ${contact.mobile}`);
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        const nextChar = line[i + 1];
+        
+        if (char === '"') {
+            if (inQuotes && nextChar === '"') {
+                // Escaped quote
+                current += '"';
+                i++; // Skip next quote
             } else {
-                console.log(`⚠️ Skipping row ${index + 1}: insufficient data`);
+                // Toggle quote state
+                inQuotes = !inQuotes;
             }
+        } else if (char === ',' && !inQuotes) {
+            // End of field
+            values.push(current);
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+    
+    // Add final field
+    values.push(current);
+    
+    return values.map(v => v.trim());
+}
+
+// Excel parsing function (requires xlsx package)
+function parseExcel(excelBuffer) {
+    try {
+        console.log('📗 Starting Excel parsing...');
+        const XLSX = require('xlsx');
+        
+        // Read the Excel file
+        const workbook = XLSX.read(excelBuffer, { type: 'buffer' });
+        
+        // Get first worksheet
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        
+        console.log(`📗 Reading sheet: ${sheetName}`);
+        
+        // Convert to JSON with headers
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        if (jsonData.length < 2) {
+            console.log('📗 Excel sheet too short, no data rows found');
+            return [];
+        }
+        
+        // Parse headers (first row)
+        const headers = jsonData[0].map(h => (h || '').toString().toLowerCase().trim());
+        console.log('📗 Excel headers detected:', headers);
+        
+        // Find column indices
+        const nameIndex = headers.findIndex(h => 
+            h.includes('name') || h.includes('contact') || h.includes('person') || h.includes('full')
+        );
+        const phoneIndex = headers.findIndex(h => 
+            h.includes('phone') || h.includes('mobile') || h.includes('number') || h.includes('tel') || h.includes('cell')
+        );
+        const emailIndex = headers.findIndex(h => 
+            h.includes('email') || h.includes('mail') || h.includes('@')
+        );
+        
+        console.log(`📗 Column mapping: name=${nameIndex}, phone=${phoneIndex}, email=${emailIndex}`);
+        
+        const contacts = [];
+        
+        // Parse data rows
+        for (let i = 1; i < jsonData.length; i++) {
+            const row = jsonData[i];
             
-        } catch (error) {
-            console.warn(`⚠️ Error processing row ${index + 1}:`, error.message);
+            if (!row || row.length === 0) continue;
+            
+            try {
+                const contact = {
+                    name: nameIndex >= 0 && row[nameIndex] ? row[nameIndex].toString().trim() : '',
+                    mobile: phoneIndex >= 0 && row[phoneIndex] ? cleanPhoneNumber(row[phoneIndex].toString().trim()) : '',
+                    email: emailIndex >= 0 && row[emailIndex] ? row[emailIndex].toString().trim() : '',
+                    passes: 1
+                };
+                
+                // Only add if we have meaningful data
+                if (contact.name || contact.mobile) {
+                    contacts.push(contact);
+                }
+            } catch (rowError) {
+                console.error(`📗 Error parsing Excel row ${i}:`, rowError);
+                continue;
+            }
         }
-    });
-    
-    return contacts;
-}
-
-// Auto-detect column mappings
-function autoDetectColumns(headers) {
-    const mapping = {};
-    
-    // Find name column
-    for (const header of headers) {
-        if (COLUMN_MAPPINGS.name.includes(header)) {
-            mapping.name = header;
-            break;
-        }
-    }
-    
-    // Find email column
-    for (const header of headers) {
-        if (COLUMN_MAPPINGS.email.includes(header)) {
-            mapping.email = header;
-            break;
-        }
-    }
-    
-    // Find phone column
-    for (const header of headers) {
-        if (COLUMN_MAPPINGS.phone.includes(header)) {
-            mapping.phone = header;
-            break;
-        }
-    }
-    
-    console.log('🎯 Auto-detected columns:', mapping);
-    
-    return mapping;
-}
-
-// Clean text data
-function cleanText(text) {
-    if (!text) return '';
-    return String(text).trim().replace(/\s+/g, ' ');
-}
-
-// Clean email data
-function cleanEmail(email) {
-    if (!email) return '';
-    const cleaned = String(email).trim().toLowerCase();
-    // Basic email validation
-    if (cleaned.includes('@') && cleaned.includes('.')) {
-        return cleaned;
-    }
-    return '';
-}
-
-// Clean phone data
-function cleanPhone(phone) {
-    if (!phone) return '';
-    
-    // Convert to string and clean
-    let cleaned = String(phone).replace(/[^\d+\-\(\)\s]/g, '').trim();
-    
-    // Remove common formatting
-    cleaned = cleaned.replace(/[\-\(\)\s]/g, '');
-    
-    // Nigerian number formatting (same as VCF parser)
-    if (cleaned.match(/^0[789]\d{9}$/)) {
-        return '+234' + cleaned.substring(1);
-    }
-    
-    // Add + if missing for international numbers
-    if (cleaned.match(/^\d{10,}$/) && !cleaned.startsWith('+')) {
-        if (cleaned.startsWith('234')) {
-            return '+' + cleaned;
-        } else if (cleaned.startsWith('1') && cleaned.length === 11) {
-            return '+' + cleaned;
-        } else if (cleaned.startsWith('44')) {
-            return '+' + cleaned;
+        
+        console.log(`📗 Excel parsed successfully: ${contacts.length} contacts extracted`);
+        return contacts;
+        
+    } catch (error) {
+        console.error('📗 Excel parsing failed:', error);
+        
+        // Try to extract as CSV if Excel parsing fails
+        try {
+            console.log('📗 Attempting CSV fallback...');
+            return parseCSV(excelBuffer.toString());
+        } catch (csvError) {
+            console.error('📗 CSV fallback also failed:', csvError);
+            return [];
         }
     }
-    
-    return cleaned;
 }
 
-// Get supported file info
+// PDF parsing function (requires pdf-parse package)
+async function parsePDF(pdfBuffer) {
+    try {
+        console.log('📄 Starting PDF parsing...');
+        const pdf = require('pdf-parse');
+        
+        // Extract text from PDF
+        const data = await pdf(pdfBuffer);
+        const textContent = data.text;
+        
+        console.log(`📄 PDF text extracted: ${textContent.length} characters`);
+        
+        if (!textContent || textContent.trim().length === 0) {
+            console.log('📄 No text content found in PDF');
+            return [];
+        }
+        
+        // Use the enhanced text parser to extract contacts from PDF content
+        const extractedContacts = parseTextContacts(textContent);
+        
+        console.log(`📄 PDF parsed successfully: ${extractedContacts.length} contacts extracted`);
+        return extractedContacts;
+        
+    } catch (error) {
+        console.error('📄 PDF parsing failed:', error);
+        
+        // Fallback: try to parse as text if it's actually a text file
+        try {
+            console.log('📄 Attempting text fallback...');
+            return parseTextContacts(pdfBuffer.toString());
+        } catch (textError) {
+            console.error('📄 Text fallback failed:', textError);
+            return [];
+        }
+    }
+}
+
+// Get supported formats for help messages
 function getSupportedFormats() {
     return {
-        supported: ['.vcf', '.csv', '.xlsx', '.xls', '.pdf', '.txt'],
-        description: 'VCF, CSV, Excel, PDF, and text files with contact data',
-        requiredColumns: 'At least Name or Phone number',
-        optionalColumns: 'Email address',
-        textPatterns: 'Automatically extracts emails and phone numbers from unstructured text'
+        formats: [
+            { name: 'VCF', description: 'Contact cards from phones', extensions: ['.vcf'] },
+            { name: 'CSV', description: 'Comma-separated values', extensions: ['.csv'] },
+            { name: 'Excel', description: 'Spreadsheet formats', extensions: ['.xlsx', '.xls'] },
+            { name: 'PDF', description: 'Text extraction from documents', extensions: ['.pdf'] },
+            { name: 'Text', description: 'Pattern matching for contact data', extensions: ['.txt'] }
+        ],
+        mimeTypes: [
+            'text/vcard',
+            'text/x-vcard',
+            'text/csv',
+            'application/csv',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/pdf',
+            'text/plain'
+        ]
     };
 }
 
+// Export all functions
 module.exports = {
     parseContactFile,
+    parseTextContacts,
+    parseCSV,
+    parseExcel,
+    parsePDF,
     getSupportedFormats,
-    COLUMN_MAPPINGS,
-    CONTACT_PATTERNS
+    cleanPhoneNumber,
+    cleanText
 };
