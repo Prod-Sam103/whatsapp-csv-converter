@@ -17,8 +17,11 @@ const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 const FILE_EXPIRY = 2 * 60 * 60 * 1000; // 2 hours
 
-// TESTING RESTRICTION - Only your number
-const AUTHORIZED_NUMBERS = ['+2348121364213']; // Your personal number
+// TESTING RESTRICTION - Authorized numbers
+const AUTHORIZED_NUMBERS = [
+    '+2348121364213', // Your personal number
+    '+2347061240799'  // New authorized number
+];
 
 // Template Configuration
 const TEMPLATE_SID = process.env.TEMPLATE_SID;
@@ -344,7 +347,7 @@ Drop your contact files—let's bulk-load them! 🚀
 💡 _Send multiple files at once for faster processing_`);
             
         } else if (Body.toLowerCase() === 'help') {
-            twiml.message(`🎖️ **WhatsApp CSV Converter V2**
+            twiml.message(`🎖️ **WhatsApp CSV Converter**
 
 📋 **HOW TO USE:**
 1. Send contact files (up to 5 at once)
@@ -358,7 +361,7 @@ Drop your contact files—let's bulk-load them! 🚀
 📄 PDF (Text extraction)
 📝 Text (Pattern matching)
 
-⚡ **V2 FEATURES:**
+⚡ **FEATURES:**
 ✅ Multi-file processing
 ✅ Batch collection system
 ✅ Universal format support
@@ -386,6 +389,7 @@ _Standing by for your contact packages..._`);
 🟢 Storage: ${redisClient ? 'REDIS' : 'MEMORY'}
 🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}
 
+**Authorized Numbers:** 2 users
 **Supported Formats:**
 📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text
 
@@ -403,27 +407,19 @@ _Ready to receive contact packages!_`);
             
         } else {
             // Enhanced welcome message
-            twiml.message(`👋 **Welcome to Contact Converter!**
+            twiml.message(`👋 **Welcome to Contact Converter V2!**
 
-Drop your contact files here for lightning-fast bulk processing! 🚀
+📨 Drop your contact files—let's bulk-load them! 🚀
 
-📂 Supported Formats:
+📁 **Supported Formats:**
+📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text
 
-   📇 VCF (phone contacts)
+💡 **Send multiple files at once for faster processing**
 
-   📊 CSV
-
-   📗 Excel
-
-   📄 PDF
-
-   📝 Text
-
-⚡️ Pro-Tip:
-Send multiple contacts at once for extra speed! 💨
-
-❓ Need Help?
-Type help.`);
+**Commands:**
+• Type *help* for detailed instructions
+• Type *test* for system status
+• Type *testtemplate* to test download buttons`);
         }
         
     } catch (error) {
@@ -545,27 +541,25 @@ app.get('/', async (req, res) => {
         </head>
         <body>
             <div class="container">
-                <h1>🎖️ WhatsApp CSV Converter V2</h1>
+                <h1>🎖️ WhatsApp CSV Converter</h1>
                 <h2>Status: ✅ OPERATIONAL</h2>
                 
                 <div class="status">
-                    <h3>Fixed Features</h3>
+                    <h3>System Status</h3>
                     <div class="metric"><span>Multi-file Processing:</span><strong>✅ Active</strong></div>
                     <div class="metric"><span>Universal Parser:</span><strong>✅ VCF, CSV, Excel, PDF, Text</strong></div>
-                    <div class="metric"><span>Template Messages:</span><strong>✅ Variable Fixed</strong></div>
+                    <div class="metric"><span>Template Messages:</span><strong>✅ Working</strong></div>
                     <div class="metric"><span>Download URLs:</span><strong>✅ Template-Compatible</strong></div>
-                    <div class="metric"><span>Text Parsing:</span><strong>✅ Enhanced (4 Methods)</strong></div>
+                    <div class="metric"><span>Authorized Users:</span><strong>2 numbers</strong></div>
                     <div class="metric"><span>Batch System:</span><strong>✅ Active</strong></div>
                     <div class="metric"><span>Storage:</span><strong>${redisClient ? 'Redis Cloud' : 'In-Memory'}</strong></div>
                     <div class="metric"><span>Active Files:</span><strong>${fileCount}</strong></div>
                 </div>
                 
-                <h3>Latest Fixes</h3>
+                <h3>Authorized Numbers</h3>
                 <ul>
-                    <li>✅ Fixed template variable passing (fileId only)</li>
-                    <li>✅ Template URL builds correctly in Twilio</li>
-                    <li>✅ WhatsApp-safe redirect endpoint active</li>
-                    <li>✅ Enhanced debug logging for troubleshooting</li>
+                    <li>+2348121364213 (Primary)</li>
+                    <li>+2347061240799 (Secondary)</li>
                 </ul>
                 
                 <p style="margin-top: 2rem; color: #666; text-align: center;">
@@ -610,14 +604,16 @@ async function getActiveFileCount() {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('🚀 OPERATION: PARSE STORM V2 - TEMPLATE VARIABLES FIXED');
+    console.log('🚀 OPERATION: PARSE STORM V2 - NEW AUTHORIZED USER ADDED');
     console.log(`📡 Listening on PORT: ${PORT}`);
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected' : 'In-Memory Mode'}`);
     console.log(`🌐 Base URL: ${BASE_URL}`);
+    console.log(`👥 Authorized Numbers: ${AUTHORIZED_NUMBERS.length}`);
+    console.log('   - +2348121364213 (Primary)');
+    console.log('   - +2347061240799 (Secondary)');
     console.log(`🎯 Template SID: ${TEMPLATE_SID || 'Not configured'}`);
     console.log('\n📋 Enhanced multi-file webhook ready at: POST /webhook');
-    console.log('🔧 Fixed: Template variables pass fileId only, template builds URL');
 });
 
 // Cleanup expired files every 30 minutes
