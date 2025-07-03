@@ -21,7 +21,6 @@ const FILE_EXPIRY = 2 * 60 * 60 * 1000; // 2 hours
 const AUTHORIZED_NUMBERS = [
     '+2348121364213', // Your personal number
     '+2347061240799'  // New authorized number
-    '+2348132474537'  // New authorized number
 ];
 
 // Template Configuration
@@ -106,11 +105,13 @@ function isAuthorizedNumber(phoneNumber) {
     return AUTHORIZED_NUMBERS.includes(cleanNumber);
 }
 
-// Parse contact media using universal parser
+// ENHANCED: Parse contact media with better TXT detection and DOCX support
 async function parseContactMedia(mediaUrl, req) {
     try {
         const accountSid = process.env.TWILIO_ACCOUNT_SID;
         const authToken = process.env.TWILIO_AUTH_TOKEN;
+        
+        console.log(`📥 Downloading media from: ${mediaUrl}`);
         
         const response = await axios.get(mediaUrl, {
             auth: {
@@ -120,24 +121,97 @@ async function parseContactMedia(mediaUrl, req) {
             responseType: 'arraybuffer'
         });
         
-        // Get content type from response headers
+        // Get content type and filename from headers
         const contentType = response.headers['content-type'] || '';
+        const contentDisposition = response.headers['content-disposition'] || '';
         
-        // Use universal parser
-        return await parseContactFile(response.data, contentType);
+        console.log(`📋 Content-Type: ${contentType}`);
+        console.log(`📋 Content-Disposition: ${contentDisposition}`);
+        
+        // Extract filename from content-disposition if available
+        let filename = '';
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch) {
+            filename = filenameMatch[1].replace(/['"]/g, '').toLowerCase();
+            console.log(`📄 Detected filename: ${filename}`);
+        }
+        
+        // Enhanced file type detection
+        let detectedType = contentType;
+        
+        // Override content type based on filename extension for better accuracy
+        if (filename) {
+            if (filename.endsWith('.txt')) {
+                detectedType = 'text/plain';
+                console.log('🔍 Filename override: Detected as text/plain');
+            } else if (filename.endsWith('.vcf')) {
+                detectedType = 'text/vcard';
+                console.log('🔍 Filename override: Detected as text/vcard');
+            } else if (filename.endsWith('.csv')) {
+                detectedType = 'text/csv';
+                console.log('🔍 Filename override: Detected as text/csv');
+            } else if (filename.endsWith('.xlsx')) {
+                detectedType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                console.log('🔍 Filename override: Detected as Excel');
+            } else if (filename.endsWith('.xls')) {
+                detectedType = 'application/vnd.ms-excel';
+                console.log('🔍 Filename override: Detected as Excel (legacy)');
+            } else if (filename.endsWith('.docx')) {
+                detectedType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+                console.log('🔍 Filename override: Detected as DOCX');
+            } else if (filename.endsWith('.doc')) {
+                detectedType = 'application/msword';
+                console.log('🔍 Filename override: Detected as DOC');
+            } else if (filename.endsWith('.pdf')) {
+                detectedType = 'application/pdf';
+                console.log('🔍 Filename override: Detected as PDF');
+            }
+        }
+        
+        // Fallback: If WhatsApp sends generic content type, try to detect from content
+        if (contentType === 'application/octet-stream' || contentType === 'text/plain' || !contentType) {
+            const buffer = Buffer.from(response.data);
+            const textContent = buffer.toString('utf8', 0, Math.min(1000, buffer.length));
+            
+            if (textContent.includes('BEGIN:VCARD')) {
+                detectedType = 'text/vcard';
+                console.log('🔍 Content analysis: Detected VCF content');
+            } else if (textContent.includes('PK') && textContent.includes('[Content_Types]')) {
+                if (filename.includes('docx') || !filename.includes('xlsx')) {
+                    detectedType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+                    console.log('🔍 Content analysis: Detected DOCX content');
+                } else {
+                    detectedType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                    console.log('🔍 Content analysis: Detected XLSX content');
+                }
+            } else if (textContent.includes('%PDF')) {
+                detectedType = 'application/pdf';
+                console.log('🔍 Content analysis: Detected PDF content');
+            } else if (textContent.includes(',') && (textContent.includes('name') || textContent.includes('phone') || textContent.includes('email'))) {
+                detectedType = 'text/csv';
+                console.log('🔍 Content analysis: Detected CSV content');
+            } else {
+                // Default to text if we can't determine
+                detectedType = 'text/plain';
+                console.log('🔍 Content analysis: Defaulting to text/plain');
+            }
+        }
+        
+        console.log(`🎯 Final detected type: ${detectedType}`);
+        
+        // Use enhanced universal parser
+        return await parseContactFile(response.data, detectedType, filename);
     } catch (error) {
-        console.error('Media download/parse error:', error);
+        console.error('❌ Media download/parse error:', error);
         throw error;
     }
 }
 
-// FIXED: Template Message Function - pass just fileId, not full URL
+// Template Message Function
 async function sendTemplateMessage(to, contactCount, fileId) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
-    // Clean the fileId
     const cleanFileId = typeof fileId === 'string' ? fileId.split('/').pop() : fileId;
-    
     console.log(`🚀 Template message - FileID: ${cleanFileId}`);
     
     const fromNumber = '+16466030424';
@@ -152,7 +226,7 @@ async function sendTemplateMessage(to, contactCount, fileId) {
                     contentSid: TEMPLATE_SID,
                     contentVariables: JSON.stringify({
                         "1": contactCount.toString(),
-                        "2": cleanFileId  // Pass JUST the fileId, template will build the URL
+                        "2": cleanFileId
                     })
                 });
                 console.log('✅ Template message sent successfully!');
@@ -162,7 +236,6 @@ async function sendTemplateMessage(to, contactCount, fileId) {
             }
         }
         
-        // Fallback for when template fails
         const downloadUrl = `${BASE_URL}/get/${cleanFileId}`;
         console.log('🚀 Attempting structured WhatsApp message...');
         await client.messages.create({
@@ -184,7 +257,7 @@ ${downloadUrl}
     }
 }
 
-// Enhanced Twilio webhook with multi-file support
+// Enhanced Twilio webhook with better file detection
 app.post('/webhook', async (req, res) => {
     const { Body, From, NumMedia } = req.body;
     
@@ -192,6 +265,13 @@ app.post('/webhook', async (req, res) => {
     console.log('From:', From);
     console.log('Message:', Body);
     console.log('Attachments:', NumMedia);
+    
+    // Log all media info for debugging
+    if (NumMedia > 0) {
+        for (let i = 0; i < parseInt(NumMedia); i++) {
+            console.log(`📎 Media ${i}: ${req.body[`MediaContentType${i}`]} - ${req.body[`MediaUrl${i}`]}`);
+        }
+    }
     
     const twiml = new twilio.twiml.MessagingResponse();
     
@@ -215,7 +295,7 @@ app.post('/webhook', async (req, res) => {
             let failedFiles = 0;
             let failureReasons = [];
             
-            // Process ALL attachments with enhanced error reporting
+            // Process ALL attachments with enhanced detection
             for (let i = 0; i < parseInt(NumMedia); i++) {
                 const mediaUrl = req.body[`MediaUrl${i}`];
                 const mediaType = req.body[`MediaContentType${i}`];
@@ -223,8 +303,9 @@ app.post('/webhook', async (req, res) => {
                 if (mediaUrl) {
                     try {
                         console.log(`📎 Processing file ${i + 1}/${NumMedia}: ${mediaType}`);
+                        console.log(`🔗 Media URL: ${mediaUrl}`);
                         
-                        // Parse using universal parser
+                        // Parse using enhanced universal parser
                         const newContacts = await parseContactMedia(mediaUrl, req);
                         console.log(`🔍 File ${i + 1} parsed: ${newContacts.length} contacts`);
                         
@@ -257,7 +338,7 @@ app.post('/webhook', async (req, res) => {
                     });
                 }
                 
-                errorMessage += `\n\n**Supported formats:**\n📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text\n\n**Required:** Name or Phone number`;
+                errorMessage += `\n\n**Supported formats:**\n📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text • 📘 DOCX\n\n**Required:** Name or Phone number`;
                 
                 twiml.message(errorMessage);
                 res.type('text/xml');
@@ -303,7 +384,6 @@ app.post('/webhook', async (req, res) => {
             
             // Create secure file with clean UUID
             const fileId = uuidv4();
-            
             console.log(`📝 Creating file with clean ID: ${fileId}`);
             
             await storage.set(`file:${fileId}`, {
@@ -322,7 +402,6 @@ app.post('/webhook', async (req, res) => {
             } catch (templateError) {
                 console.error('❌ Template failed, using TwiML fallback:', templateError);
                 
-                // Fixed fallback with /get/ URL
                 const downloadUrl = `${BASE_URL}/get/${fileId}`;
                 twiml.message(`✅ **Your CSV file with ${batch.contacts.length} contacts is ready!**
 
@@ -337,13 +416,12 @@ ${downloadUrl}
             await storage.del(`batch:${From}`);
             
         } else if (Body === '2️⃣' || Body === '2') {
-            // Continue adding - enhanced prompt
             twiml.message(`📨 **Ready for more files!**
 
 Drop your contact files—let's bulk-load them! 🚀
 
-📁 **Supported formats:**
-📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text
+📂 **Supported formats:**
+📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text • 📘 DOCX
 
 💡 _Send multiple files at once for faster processing_`);
             
@@ -355,16 +433,17 @@ Drop your contact files—let's bulk-load them! 🚀
 2. Tap 1️⃣ to export or 2️⃣ to add more
 3. Download your CSV file
 
-📁 **SUPPORTED FORMATS:**
-📇 VCF (Contact cards)
-📊 CSV (Comma-separated)
-📗 Excel (.xlsx, .xls)
-📄 PDF (Text extraction)
-📝 Text (Pattern matching)
+📂 **Supported Formats:**
+   📇 VCF (phone contacts)
+   📊 CSV
+   📗 Excel
+   📄 PDF
+   📝 Text
+   📘 DOCX
 
 ⚡ **FEATURES:**
 ✅ Multi-file processing
-✅ Batch collection system
+✅ Enhanced file detection
 ✅ Universal format support
 ✅ Smart text extraction
 ✅ Template download buttons
@@ -373,6 +452,7 @@ Drop your contact files—let's bulk-load them! 🚀
 • Send multiple files together
 • Works with iPhone & Android exports
 • PDF contact lists supported
+• Word documents with contact data
 • Text files with contact patterns
 
 _Standing by for your contact packages..._`);
@@ -382,17 +462,18 @@ _Standing by for your contact packages..._`);
 
 🟢 Bot: OPERATIONAL
 🟢 Multi-file Parser: ARMED
-🟢 Universal Parser: READY
-🟢 Text Parsing: ENHANCED
+🟢 Universal Parser: ENHANCED
+🟢 Text Detection: IMPROVED
+🟢 DOCX Support: ADDED
 🟢 Template Messages: ACTIVE
-🟢 Download URLs: TEMPLATE-FIXED
+🟢 Download URLs: WORKING
 🟢 Batch System: ACTIVE
 🟢 Storage: ${redisClient ? 'REDIS' : 'MEMORY'}
 🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}
 
 **Authorized Numbers:** 2 users
 **Supported Formats:**
-📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text
+📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text • 📘 DOCX
 
 _Ready to receive contact packages!_`);
             
@@ -407,20 +488,24 @@ _Ready to receive contact packages!_`);
             }
             
         } else {
-            // Enhanced welcome message
-            twiml.message(`👋 **Welcome to Contact Converter V2!**
+            // Your updated welcome message
+            twiml.message(`👋 *Welcome to Contact Converter!*
 
-📨 Drop your contact files—let's bulk-load them! 🚀
+Drop your contact files here for lightning-fast bulk processing! 🚀
 
-📁 **Supported Formats:**
-📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text
+📂 Supported Formats:
+   📇 VCF (phone contacts)
+   📊 CSV
+   📗 Excel
+   📄 PDF
+   📝 Text
+   📘 DOCX
 
-💡 **Send multiple files at once for faster processing**
+⚡️ Pro-Tip:
+Send multiple contacts at once for extra speed! 💨
 
-**Commands:**
-• Type *help* for detailed instructions
-• Type *test* for system status
-• Type *testtemplate* to test download buttons`);
+❓ Need Help?
+Type help.`);
         }
         
     } catch (error) {
@@ -441,21 +526,16 @@ Please try again or contact support.
 // WhatsApp-safe redirect endpoint
 app.get('/get/:fileId', async (req, res) => {
     const { fileId } = req.params;
-    
     console.log(`🔗 WhatsApp redirect request for file: ${fileId}`);
-    
-    // Just redirect to the actual download
     res.redirect(301, `/download/${fileId}`);
 });
 
-// Download endpoint (no password for simplicity)
+// Download endpoint
 app.get('/download/:fileId', async (req, res) => {
     const { fileId } = req.params;
     
     try {
         console.log(`📥 Download request for file: ${fileId}`);
-        
-        // Get file data
         const fileData = await storage.get(`file:${fileId}`);
         
         if (!fileData) {
@@ -498,7 +578,6 @@ app.get('/download/:fileId', async (req, res) => {
             `);
         }
         
-        // Send CSV file directly
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename="${fileData.filename}"`);
         res.send(fileData.content);
@@ -519,7 +598,7 @@ app.get('/', async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>WhatsApp CSV Converter V2</title>
+            <title>WhatsApp CSV Converter - Enhanced</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 body {
@@ -546,21 +625,33 @@ app.get('/', async (req, res) => {
                 <h2>Status: ✅ OPERATIONAL</h2>
                 
                 <div class="status">
-                    <h3>System Status</h3>
+                    <h3>Enhanced Features</h3>
                     <div class="metric"><span>Multi-file Processing:</span><strong>✅ Active</strong></div>
-                    <div class="metric"><span>Universal Parser:</span><strong>✅ VCF, CSV, Excel, PDF, Text</strong></div>
+                    <div class="metric"><span>File Detection:</span><strong>✅ Enhanced TXT & DOCX</strong></div>
+                    <div class="metric"><span>Universal Parser:</span><strong>✅ 6 Formats</strong></div>
                     <div class="metric"><span>Template Messages:</span><strong>✅ Working</strong></div>
-                    <div class="metric"><span>Download URLs:</span><strong>✅ Template-Compatible</strong></div>
                     <div class="metric"><span>Authorized Users:</span><strong>2 numbers</strong></div>
-                    <div class="metric"><span>Batch System:</span><strong>✅ Active</strong></div>
                     <div class="metric"><span>Storage:</span><strong>${redisClient ? 'Redis Cloud' : 'In-Memory'}</strong></div>
                     <div class="metric"><span>Active Files:</span><strong>${fileCount}</strong></div>
                 </div>
                 
-                <h3>Authorized Numbers</h3>
+                <h3>Supported Formats (6 Total)</h3>
                 <ul>
-                    <li>+2348121364213 (Primary)</li>
-                    <li>+2347061240799 (Secondary)</li>
+                    <li>📇 VCF - Contact cards</li>
+                    <li>📊 CSV - Spreadsheet data</li>
+                    <li>📗 Excel - .xlsx/.xls files</li>
+                    <li>📄 PDF - Text extraction</li>
+                    <li>📝 Text - Pattern matching</li>
+                    <li>📘 DOCX - Word documents</li>
+                </ul>
+                
+                <h3>Latest Enhancements</h3>
+                <ul>
+                    <li>✅ Fixed TXT file detection and processing</li>
+                    <li>✅ Added DOCX support for Word documents</li>
+                    <li>✅ Enhanced file type detection from filenames</li>
+                    <li>✅ Better content analysis for unknown types</li>
+                    <li>✅ Updated user interface messaging</li>
                 </ul>
                 
                 <p style="margin-top: 2rem; color: #666; text-align: center;">
@@ -591,7 +682,6 @@ async function getActiveFileCount() {
             return 0;
         }
     } else {
-        // Clean expired files first
         const now = Date.now();
         Object.keys(fileStorage).forEach(key => {
             if (fileStorage[key].expires < now) {
@@ -605,7 +695,7 @@ async function getActiveFileCount() {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('🚀 OPERATION: PARSE STORM V2 - NEW AUTHORIZED USER ADDED');
+    console.log('🚀 OPERATION: PARSE STORM - TXT FIXED & DOCX SUPPORT ADDED');
     console.log(`📡 Listening on PORT: ${PORT}`);
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected' : 'In-Memory Mode'}`);
@@ -614,7 +704,13 @@ app.listen(PORT, () => {
     console.log('   - +2348121364213 (Primary)');
     console.log('   - +2347061240799 (Secondary)');
     console.log(`🎯 Template SID: ${TEMPLATE_SID || 'Not configured'}`);
-    console.log('\n📋 Enhanced multi-file webhook ready at: POST /webhook');
+    console.log('\n📋 Enhanced Features:');
+    console.log('   ✅ Fixed TXT file detection and processing');
+    console.log('   ✅ Added DOCX support for Word documents');
+    console.log('   ✅ Enhanced content type detection');
+    console.log('   ✅ Updated user interface messaging');
+    console.log('   📁 Supported: VCF, CSV, Excel, PDF, Text, DOCX');
+    console.log('\n📋 Enhanced webhook ready at: POST /webhook');
 });
 
 // Cleanup expired files every 30 minutes
