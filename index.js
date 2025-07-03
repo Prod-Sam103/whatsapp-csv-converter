@@ -21,6 +21,7 @@ const FILE_EXPIRY = 2 * 60 * 60 * 1000; // 2 hours
 const AUTHORIZED_NUMBERS = [
     '+2348121364213', // Your personal number
     '+2347061240799'  // New authorized number
+    '+2348132474537'  // New authorized number
 ];
 
 // Template Configuration
