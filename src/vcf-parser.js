@@ -1,28 +1,72 @@
-// vcf-parser.js - Enhanced Multi-Contact Parser
+// vcf-parser.js - Enhanced Multi-Contact Parser with Better Debugging
 function parseVCF(vcfContent) {
     const contacts = [];
     
+    console.log('🔍 === VCF PARSER START ===');
+    console.log('🔍 Raw content type:', typeof vcfContent);
+    console.log('🔍 Raw content length:', vcfContent?.length || 0);
+    
+    // Handle buffer input
+    let content = vcfContent;
+    if (Buffer.isBuffer(vcfContent)) {
+        content = vcfContent.toString('utf8');
+        console.log('🔍 Converted buffer to string, length:', content.length);
+    }
+    
+    if (!content || typeof content !== 'string') {
+        console.log('❌ Invalid VCF content provided');
+        return contacts;
+    }
+    
     // Fix line endings and split into cards
-    const normalizedContent = vcfContent
+    const normalizedContent = content
         .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n');
+        .replace(/\r/g, '\n')
+        .trim();
     
     console.log('🔍 Normalized content length:', normalizedContent.length);
-    console.log('🔍 First 300 chars:', normalizedContent.substring(0, 300));
+    console.log('🔍 First 500 chars:');
+    console.log(normalizedContent.substring(0, 500));
+    console.log('🔍 Last 200 chars:');
+    console.log(normalizedContent.substring(Math.max(0, normalizedContent.length - 200)));
+    
+    // Count total BEGIN/END blocks for validation
+    const beginCount = (normalizedContent.match(/BEGIN:VCARD/gi) || []).length;
+    const endCount = (normalizedContent.match(/END:VCARD/gi) || []).length;
+    console.log(`🔍 Found ${beginCount} BEGIN:VCARD and ${endCount} END:VCARD blocks`);
     
     // Split by BEGIN:VCARD - more robust approach
     const vcardBlocks = normalizedContent.split(/(?=BEGIN:VCARD)/i).filter(block => 
-        block.trim() && block.includes('BEGIN:VCARD')
+        block.trim() && block.toUpperCase().includes('BEGIN:VCARD')
     );
     
-    console.log('🔍 Found VCard blocks:', vcardBlocks.length);
+    console.log('🔍 Found VCard blocks after split:', vcardBlocks.length);
+    
+    // If no proper blocks found, try alternative splitting
+    if (vcardBlocks.length === 0 && normalizedContent.includes('BEGIN:VCARD')) {
+        console.log('🔍 Trying alternative block splitting...');
+        const altBlocks = normalizedContent.split('BEGIN:VCARD');
+        altBlocks.forEach((block, index) => {
+            if (index > 0) { // Skip first empty part
+                vcardBlocks.push('BEGIN:VCARD' + block);
+            }
+        });
+        console.log('🔍 Alternative splitting found:', vcardBlocks.length, 'blocks');
+    }
     
     vcardBlocks.forEach((vcard, index) => {
-        console.log(`🔍 Processing VCard ${index + 1}:`);
-        console.log('First 100 chars:', vcard.substring(0, 100));
+        console.log(`\n🔍 === Processing VCard ${index + 1}/${vcardBlocks.length} ===`);
+        console.log('🔍 Block length:', vcard.length);
+        console.log('🔍 First 150 chars:', vcard.substring(0, 150));
         
-        if (!vcard.includes('END:VCARD')) {
-            console.log('⚠️ VCard missing END:VCARD, skipping');
+        // Check for proper VCard structure
+        const hasBegin = vcard.toUpperCase().includes('BEGIN:VCARD');
+        const hasEnd = vcard.toUpperCase().includes('END:VCARD');
+        
+        console.log(`🔍 Has BEGIN: ${hasBegin}, Has END: ${hasEnd}`);
+        
+        if (!hasBegin || !hasEnd) {
+            console.log('⚠️ Malformed VCard, missing BEGIN or END, skipping');
             return;
         }
         
@@ -30,113 +74,202 @@ function parseVCF(vcfContent) {
             name: '',
             mobile: '',
             email: '',
+            company: '',
             passes: 1
         };
         
-        // Extract lines
-        const lines = vcard.split('\n').map(l => l.trim()).filter(l => l);
-        console.log(`🔍 Lines in VCard ${index + 1}:`, lines.length);
+        // Extract lines and clean them
+        const lines = vcard.split('\n')
+            .map(l => l.trim())
+            .filter(l => l && !l.match(/^BEGIN:VCARD$/i) && !l.match(/^END:VCARD$/i));
         
-        // Extract name (N field first, then FN as fallback)
-        const nLine = lines.find(line => line.match(/^N:/i));
+        console.log(`🔍 Extracted ${lines.length} data lines`);
+        lines.forEach((line, i) => {
+            if (i < 5) { // Show first 5 lines for debugging
+                console.log(`   Line ${i + 1}: ${line}`);
+            }
+        });
+        
+        // Extract name with multiple strategies
+        let extractedName = '';
+        
+        // Strategy 1: N field (structured name)
+        const nLine = lines.find(line => line.match(/^N[:;]/i));
         if (nLine) {
-            const nValue = nLine.replace(/^N:/i, '').trim();
-            const nameParts = nValue.split(';').filter(p => p);
+            console.log('🔍 Found N line:', nLine);
+            const nValue = nLine.replace(/^N[:;]/i, '').trim();
+            const nameParts = nValue.split(';').map(p => p.trim()).filter(p => p);
             
             if (nameParts.length >= 2) {
-                const lastName = nameParts[0]?.trim() || '';
-                const firstName = nameParts[1]?.trim() || '';
-                contact.name = `${firstName} ${lastName}`.trim();
+                const lastName = nameParts[0] || '';
+                const firstName = nameParts[1] || '';
+                extractedName = `${firstName} ${lastName}`.trim();
+                console.log('🔍 Extracted from N field:', extractedName);
             } else if (nameParts.length === 1) {
-                contact.name = nameParts[0].trim();
+                extractedName = nameParts[0];
+                console.log('🔍 Extracted single name from N field:', extractedName);
             }
         }
         
-        // Fallback to FN field if no N field or empty name
-        if (!contact.name) {
-            const fnLine = lines.find(line => line.match(/^FN:/i));
+        // Strategy 2: FN field (formatted name) as fallback
+        if (!extractedName) {
+            const fnLine = lines.find(line => line.match(/^FN[:;]/i));
             if (fnLine) {
-                contact.name = fnLine.replace(/^FN:/i, '').trim();
+                console.log('🔍 Found FN line:', fnLine);
+                extractedName = fnLine.replace(/^FN[:;]/i, '').trim();
+                console.log('🔍 Extracted from FN field:', extractedName);
             }
         }
+        
+        contact.name = extractedName;
         
         // Extract phone numbers - handle multiple formats
         const telLines = lines.filter(line => 
             line.match(/^TEL/i) || 
-            line.match(/^item\d*\.TEL/i)  // Apple format
+            line.match(/^item\d*\.TEL/i) ||  // Apple format
+            line.match(/^TEL;/i) ||
+            line.match(/^TEL:/i)
         );
+        
+        console.log(`🔍 Found ${telLines.length} TEL lines:`, telLines);
         
         let selectedPhone = '';
         let cellPhone = '';
+        let workPhone = '';
+        let homePhone = '';
         
-        telLines.forEach(telLine => {
+        telLines.forEach((telLine, telIndex) => {
+            console.log(`🔍 Processing TEL line ${telIndex + 1}:`, telLine);
+            
             let phone = '';
             
             // Extract phone number after colon
             if (telLine.includes(':')) {
                 phone = telLine.split(':').slice(1).join(':').trim();
+            } else if (telLine.includes(';')) {
+                // Handle cases where format is TEL;TYPE=CELL;555-1234
+                const parts = telLine.split(';');
+                phone = parts[parts.length - 1].trim();
             }
             
-            // Clean phone number
-            phone = phone.replace(/[^\d+\s\-\(\)]/g, '').trim();
+            console.log(`🔍 Raw phone extracted:`, phone);
             
-            // Check if it's a cell/mobile number
+            // Clean phone number but preserve international format
+            const cleanPhone = phone.replace(/[^\d+\s\-\(\)]/g, '').trim();
+            console.log(`🔍 Cleaned phone:`, cleanPhone);
+            
+            // Categorize phone by type
             if (telLine.match(/CELL|MOBILE/i)) {
-                cellPhone = phone;
+                cellPhone = cleanPhone;
+                console.log(`🔍 Identified as CELL phone:`, cellPhone);
+            } else if (telLine.match(/WORK|BUSINESS/i)) {
+                workPhone = cleanPhone;
+                console.log(`🔍 Identified as WORK phone:`, workPhone);
+            } else if (telLine.match(/HOME/i)) {
+                homePhone = cleanPhone;
+                console.log(`🔍 Identified as HOME phone:`, homePhone);
             }
             
-            // Store first phone found as fallback
-            if (!selectedPhone && phone) {
-                selectedPhone = phone;
+            // Store first valid phone found as fallback
+            if (!selectedPhone && cleanPhone) {
+                selectedPhone = cleanPhone;
+                console.log(`🔍 Set as primary phone:`, selectedPhone);
             }
         });
         
-        // Prefer cell phone, otherwise use first phone found
-        let finalPhone = cellPhone || selectedPhone;
+        // Prefer cell phone, then work, then home, then any phone
+        let finalPhone = cellPhone || workPhone || homePhone || selectedPhone;
+        console.log(`🔍 Final phone selection:`, finalPhone);
         
-        // Format Nigerian numbers
+        // Format Nigerian numbers and other international formats
         if (finalPhone) {
-            // Nigerian local format (0XX)
-            if (finalPhone.match(/^0[789]\d{9}$/)) {
-                finalPhone = '+234' + finalPhone.substring(1);
+            let formattedPhone = finalPhone;
+            
+            // Remove all non-digit characters except +
+            formattedPhone = formattedPhone.replace(/[^\d+]/g, '');
+            
+            // Nigerian local format (0XX) to international
+            if (formattedPhone.match(/^0[789]\d{9}$/)) {
+                formattedPhone = '+234' + formattedPhone.substring(1);
+                console.log(`🔍 Formatted Nigerian number:`, formattedPhone);
+            }
+            // Nigerian without 0 prefix
+            else if (formattedPhone.match(/^[789]\d{9}$/)) {
+                formattedPhone = '+234' + formattedPhone;
+                console.log(`🔍 Formatted Nigerian number (no 0):`, formattedPhone);
             }
             // Add + if missing for international numbers
-            else if (finalPhone.match(/^\d{10,}$/) && !finalPhone.startsWith('+')) {
-                if (finalPhone.startsWith('234')) {
-                    finalPhone = '+' + finalPhone;
-                } else if (finalPhone.startsWith('1') && finalPhone.length === 11) {
-                    finalPhone = '+' + finalPhone;
-                } else if (finalPhone.startsWith('44')) {
-                    finalPhone = '+' + finalPhone;
+            else if (formattedPhone.match(/^\d{10,}$/) && !formattedPhone.startsWith('+')) {
+                if (formattedPhone.startsWith('234')) {
+                    formattedPhone = '+' + formattedPhone;
+                } else if (formattedPhone.startsWith('1') && formattedPhone.length === 11) {
+                    formattedPhone = '+' + formattedPhone;
+                } else if (formattedPhone.startsWith('44')) {
+                    formattedPhone = '+' + formattedPhone;
+                } else {
+                    // Keep as is for other international formats
+                    formattedPhone = '+' + formattedPhone;
                 }
+                console.log(`🔍 Added + prefix:`, formattedPhone);
             }
+            
+            finalPhone = formattedPhone;
         }
         
         contact.mobile = finalPhone;
         
-        // Extract email
+        // Extract email with multiple strategies
         const emailLine = lines.find(line => 
             line.match(/^EMAIL/i) || 
-            line.match(/^item\d*\.EMAIL/i)
+            line.match(/^item\d*\.EMAIL/i) ||
+            line.match(/^EMAIL[:;]/i)
         );
         
         if (emailLine) {
+            console.log('🔍 Found EMAIL line:', emailLine);
+            let email = '';
             if (emailLine.includes(':')) {
-                contact.email = emailLine.split(':').slice(1).join(':').trim();
+                email = emailLine.split(':').slice(1).join(':').trim();
             }
+            contact.email = email;
+            console.log('🔍 Extracted email:', email);
         }
         
-        console.log(`🔍 Parsed contact ${index + 1}:`, contact.name, contact.mobile);
+        // Extract organization/company
+        const orgLine = lines.find(line => line.match(/^ORG[:;]/i));
+        if (orgLine) {
+            console.log('🔍 Found ORG line:', orgLine);
+            const org = orgLine.replace(/^ORG[:;]/i, '').trim();
+            contact.company = org;
+            console.log('🔍 Extracted company:', org);
+        }
         
-        // Only add contact if we have meaningful data
-        if (contact.name || contact.mobile) {
+        console.log(`🔍 Final parsed contact ${index + 1}:`);
+        console.log(`   Name: "${contact.name}"`);
+        console.log(`   Mobile: "${contact.mobile}"`);
+        console.log(`   Email: "${contact.email}"`);
+        console.log(`   Company: "${contact.company}"`);
+        
+        // Enhanced validation - accept if we have name OR phone OR email
+        const hasName = contact.name && contact.name.trim();
+        const hasPhone = contact.mobile && contact.mobile.trim();
+        const hasEmail = contact.email && contact.email.trim();
+        
+        if (hasName || hasPhone || hasEmail) {
             contacts.push(contact);
+            console.log(`✅ Contact ${index + 1} ACCEPTED`);
         } else {
-            console.log(`⚠️ Skipping empty contact ${index + 1}`);
+            console.log(`❌ Contact ${index + 1} REJECTED - no valid data`);
         }
     });
     
-    console.log(`🎯 Successfully extracted ${contacts.length} contacts from VCF`);
+    console.log(`\n🎯 === VCF PARSER COMPLETE ===`);
+    console.log(`🎯 Successfully extracted ${contacts.length} contacts from ${vcardBlocks.length} VCard blocks`);
+    
+    // Final summary
+    contacts.forEach((contact, index) => {
+        console.log(`Final Contact ${index + 1}: ${contact.name || 'NO_NAME'} | ${contact.mobile || 'NO_PHONE'} | ${contact.email || 'NO_EMAIL'}`);
+    });
     
     return contacts;
 }
