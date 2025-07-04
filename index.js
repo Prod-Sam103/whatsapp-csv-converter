@@ -302,23 +302,70 @@ async function parseContactMediaScalable(mediaUrl, req) {
     }
 }
 
-// Enhanced parsing with memory management
+// Enhanced parsing with detailed validation logging
 async function parseContactFileScalable(fileContent, mediaType, filename) {
     try {
         console.log(`🔄 Starting scalable parse for type: ${mediaType}`);
         
         // Use enhanced universal parser with chunking
         const contacts = await parseContactFile(fileContent, mediaType, filename);
+        console.log(`📥 Raw parsing result: ${contacts.length} contacts extracted`);
         
-        // Validate and clean contacts
-        const validContacts = contacts.filter(contact => {
-            // Must have either name or phone
-            return (contact.name && contact.name.trim()) || 
-                   (contact.mobile && contact.mobile.trim()) ||
-                   (contact.phone && contact.phone.trim());
+        // Enhanced validation with detailed logging
+        const validContacts = [];
+        const rejectedContacts = [];
+        
+        contacts.forEach((contact, index) => {
+            // More flexible validation - accept if has ANY meaningful data
+            const hasName = contact.name && contact.name.trim() && contact.name.trim() !== '';
+            const hasMobile = contact.mobile && contact.mobile.trim() && contact.mobile.trim() !== '';
+            const hasPhone = contact.phone && contact.phone.trim() && contact.phone.trim() !== '';
+            const hasWorkPhone = contact.work_phone && contact.work_phone.trim() && contact.work_phone.trim() !== '';
+            const hasHomePhone = contact.home_phone && contact.home_phone.trim() && contact.home_phone.trim() !== '';
+            const hasEmail = contact.email && contact.email.trim() && contact.email.trim() !== '';
+            
+            const hasAnyPhone = hasMobile || hasPhone || hasWorkPhone || hasHomePhone;
+            const hasAnyData = hasName || hasAnyPhone || hasEmail;
+            
+            // MUCH more permissive - accept if has name OR phone OR email
+            if (hasAnyData) {
+                // Clean up the contact before adding
+                const cleanContact = {
+                    name: (contact.name || contact.fn || contact.fullname || '').trim(),
+                    mobile: (contact.mobile || contact.phone || contact.tel || contact.work_phone || contact.home_phone || '').trim(),
+                    email: (contact.email || contact.mail || '').trim(),
+                    company: (contact.company || contact.organization || contact.org || '').trim(),
+                    notes: (contact.notes || contact.note || '').trim()
+                };
+                
+                // Final check - must have at least name or phone
+                if (cleanContact.name || cleanContact.mobile) {
+                    validContacts.push(cleanContact);
+                } else {
+                    rejectedContacts.push({
+                        index: index + 1,
+                        reason: 'No usable name or phone after cleaning',
+                        data: contact
+                    });
+                }
+            } else {
+                rejectedContacts.push({
+                    index: index + 1,
+                    reason: 'No name, phone, or email found',
+                    data: contact
+                });
+            }
         });
         
-        console.log(`✅ Validation complete: ${validContacts.length}/${contacts.length} valid contacts`);
+        if (rejectedContacts.length > 0) {
+            console.log(`⚠️ Rejected ${rejectedContacts.length} contacts:`);
+            rejectedContacts.slice(0, 5).forEach(rejected => {
+                console.log(`   - Contact ${rejected.index}: ${rejected.reason}`);
+                console.log(`     Raw data: ${JSON.stringify(rejected.data).substring(0, 150)}...`);
+            });
+        }
+        
+        console.log(`✅ Validation complete: ${validContacts.length}/${contacts.length} valid contacts (${rejectedContacts.length} rejected)`);
         
         return validContacts;
         
@@ -326,7 +373,9 @@ async function parseContactFileScalable(fileContent, mediaType, filename) {
         console.error(`❌ Scalable parsing failed for ${mediaType}:`, error);
         // Final fallback to text parsing
         try {
-            return parseContactFile(fileContent.toString(), 'text/plain', filename);
+            const fallbackContacts = await parseContactFile(fileContent.toString(), 'text/plain', filename);
+            console.log(`🔄 Fallback parsing yielded: ${fallbackContacts.length} contacts`);
+            return fallbackContacts;
         } catch (fallbackError) {
             console.error('❌ Fallback parsing also failed:', fallbackError);
             return [];
@@ -374,9 +423,7 @@ async function sendTemplateMessage(to, contactCount, fileId) {
 ${downloadUrl}
 
 ⏰ _Link expires in 2 hours_
-💡 _Tap the link above to download your file_
-
-🚀 _Processed in high-performance mode for ${contactCount} contacts_`
+💡 _Tap the link above to download your file_`
         });
         console.log('✅ Structured WhatsApp message sent!');
         
@@ -523,13 +570,11 @@ app.post('/webhook', async (req, res) => {
             // Save batch (expires in 10 minutes)
             await storage.set(`batch:${From}`, batch, 600);
             
-            const processingTime = Date.now() - startTime;
-            
-            // Enhanced confirmation message with performance stats
-            let statusMessage = `🚀 **${batch.count} contacts saved so far** (${processingTime}ms)`;
+            // Enhanced confirmation message - clean UX (no processing time)
+            let statusMessage = `💾 **${batch.count} contacts saved so far.**`;
             
             if (processedFiles > 0) {
-                statusMessage += `\n\n⚡ Processed ${processedFiles} file(s): +${totalNewContacts} contacts`;
+                statusMessage += `\n\n✅ Processed ${processedFiles} file(s): +${totalNewContacts} contacts`;
             }
             
             if (failedFiles > 0) {
@@ -593,9 +638,7 @@ app.post('/webhook', async (req, res) => {
 ${downloadUrl}
 
 ⏰ _Link expires in 2 hours_
-💡 _Tap the link above to download your file_
-
-🚀 _High-performance processing: ${batch.contacts.length} contacts in ${csvTime}ms_`);
+💡 _Tap the link above to download your file_`);
             }
             
             // Clear batch after export
@@ -664,9 +707,8 @@ _Standing by for your contact packages..._`);
             
         } else if (Body.toLowerCase() === 'test') {
             const fileCount = await getActiveFileCount();
-            const processingTime = Date.now() - startTime;
             
-            twiml.message(`✅ **High-Performance Systems Check Complete** (${processingTime}ms)
+            twiml.message(`✅ **High-Performance Systems Check Complete**
 
 🟢 Bot: OPERATIONAL
 🟢 Parallel Processing: ARMED
@@ -730,9 +772,8 @@ Type help.`);
         
     } catch (error) {
         console.error('❌ Operation failed:', error);
-        const processingTime = Date.now() - startTime;
         
-        twiml.message(`❌ **System Error** (${processingTime}ms)
+        twiml.message(`❌ **System Error**
 
 Processing failed: ${error.message}
 
@@ -952,6 +993,7 @@ app.get('/', async (req, res) => {
                     <li>✅ <strong>Enhanced Error Handling:</strong> Detailed feedback on processing failures</li>
                     <li>✅ <strong>Performance Monitoring:</strong> Processing time tracking and optimisation</li>
                     <li>✅ <strong>Large File Support:</strong> 20MB files with streaming and chunking</li>
+                    <li>✅ <strong>Enhanced Validation:</strong> More permissive contact acceptance</li>
                 </ul>
                 
                 <h3>📊 Architecture Optimisations</h3>
@@ -962,6 +1004,7 @@ app.get('/', async (req, res) => {
                     <li><strong>Payload Compression:</strong> Large contact lists stored efficiently</li>
                     <li><strong>Streaming Downloads:</strong> Large CSV files downloaded optimally</li>
                     <li><strong>UTF-8 BOM:</strong> Excel compatibility for international characters</li>
+                    <li><strong>Enhanced Validation:</strong> Accepts contacts with name OR phone OR email</li>
                 </ul>
                 
                 <p style="margin-top: 2rem; color: #666; text-align: center;">
@@ -1010,7 +1053,7 @@ async function getActiveFileCount() {
 // Start server with enhanced logging
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('🚀 OPERATION: HIGH-PERFORMANCE PARSE STORM - SCALE OPTIMISED');
+    console.log('🚀 OPERATION: HIGH-PERFORMANCE PARSE STORM - CONTACT VALIDATION ENHANCED');
     console.log(`📡 Listening on PORT: ${PORT}`);
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected (Optimised)' : 'In-Memory Mode'}`);
@@ -1028,6 +1071,7 @@ app.listen(PORT, () => {
     console.log('   ⏱️ Timeout protection: 25 seconds');
     console.log('   📁 Large file support: up to 20MB');
     console.log('   🔄 Enhanced error handling and recovery');
+    console.log('   ✅ Enhanced validation: accepts name OR phone OR email');
     console.log('   📁 Supported: VCF, CSV, Excel, PDF, Text, DOCX');
     console.log('\n📋 Enhanced webhook ready at: POST /webhook');
 });
@@ -1073,4 +1117,3 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
     console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
 });
-        
