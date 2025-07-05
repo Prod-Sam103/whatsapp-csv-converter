@@ -34,8 +34,9 @@ const AUTHORIZED_NUMBERS = [
     '+2348132474537'  // New authorized number
 ];
 
-// Template Configuration
-const TEMPLATE_SID = process.env.TEMPLATE_SID;
+// Template Configuration - TWO TEMPLATES
+const STATUS_TEMPLATE_SID = process.env.STATUS_TEMPLATE_SID; // New: Status with Export button
+const DOWNLOAD_TEMPLATE_SID = process.env.DOWNLOAD_TEMPLATE_SID; // Existing: Download CSV button
 
 // Storage (will be replaced with Redis in production)
 let fileStorage = {};
@@ -385,37 +386,104 @@ async function parseContactFileScalable(fileContent, mediaType, filename) {
     }
 }
 
-// Template Message Function with Download Button
-async function sendTemplateMessage(to, contactCount, fileId) {
+// Template 1: Status Message with Export Button
+async function sendStatusTemplateWithExportButton(to, batch) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    
-    const cleanFileId = typeof fileId === 'string' ? fileId.split('/').pop() : fileId;
-    console.log(`🚀 Template message - FileID: ${cleanFileId}, Count: ${contactCount}`);
-    
     const fromNumber = '+16466030424';
+    const remaining = MAX_CONTACTS_PER_BATCH - batch.count;
+    
+    console.log(`🚀 Sending status template with Export button - Count: ${batch.count}, Files: ${batch.filesProcessed}, Remaining: ${remaining}`);
     
     try {
-        if (TEMPLATE_SID) {
-            console.log('🚀 Attempting WhatsApp Business Template with Download Button...');
-            try {
-                await client.messages.create({
-                    from: `whatsapp:${fromNumber}`,
-                    to: to,
-                    contentSid: TEMPLATE_SID,
-                    contentVariables: JSON.stringify({
-                        "1": contactCount.toString(),
-                        "2": cleanFileId
-                    })
-                });
-                console.log('✅ Template message with download button sent successfully!');
-                return;
-            } catch (templateError) {
-                console.error('❌ Business template failed:', templateError.message);
-            }
+        if (STATUS_TEMPLATE_SID) {
+            console.log('🚀 Attempting Status Template with Export Button...');
+            
+            await client.messages.create({
+                from: `whatsapp:${fromNumber}`,
+                to: to,
+                contentSid: STATUS_TEMPLATE_SID,
+                contentVariables: JSON.stringify({
+                    "1": batch.count.toString(),           // Contact count
+                    "2": batch.filesProcessed.toString(),  // Files processed  
+                    "3": remaining.toString()              // Remaining slots
+                })
+            });
+            
+            console.log('✅ Status template with Export button sent successfully!');
+            return;
+            
+        } else {
+            console.log('⚠️ STATUS_TEMPLATE_SID not configured, using fallback');
+            throw new Error('Status template not configured');
         }
         
+    } catch (templateError) {
+        console.error('❌ Status template failed:', templateError.message);
+        
+        // Fallback to regular text message
+        console.log('🚀 Using fallback text message...');
+        
+        let statusMessage = `💾 *${batch.count} contacts saved so far.*`;
+        
+        if (batch.filesProcessed > 0) {
+            statusMessage += `\n✅ Processed ${batch.filesProcessed} file(s)`;
+        }
+        
+        if (remaining > 0) {
+            statusMessage += `\n📋 *Note:* Received ${batch.count}/${MAX_CONTACTS_PER_BATCH} contacts (You can send ${remaining} more)`;
+        } else {
+            statusMessage += `\n📋 *Note:* Batch limit reached (${MAX_CONTACTS_PER_BATCH}/${MAX_CONTACTS_PER_BATCH})`;
+        }
+        
+        statusMessage += `\n\nKeep sending more contacts or type "export" when ready`;
+        
+        await client.messages.create({
+            from: `whatsapp:${fromNumber}`,
+            to: to,
+            body: statusMessage
+        });
+        
+        console.log('✅ Fallback status message sent');
+    }
+}
+
+// Template 2: Download CSV Button
+async function sendDownloadTemplateMessage(to, contactCount, fileId) {
+    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    const fromNumber = '+16466030424';
+    
+    const cleanFileId = typeof fileId === 'string' ? fileId.split('/').pop() : fileId;
+    console.log(`🚀 Sending download template - FileID: ${cleanFileId}, Count: ${contactCount}`);
+    
+    try {
+        if (DOWNLOAD_TEMPLATE_SID) {
+            console.log('🚀 Attempting Download Template with CSV Button...');
+            
+            await client.messages.create({
+                from: `whatsapp:${fromNumber}`,
+                to: to,
+                contentSid: DOWNLOAD_TEMPLATE_SID,
+                contentVariables: JSON.stringify({
+                    "1": contactCount.toString(),
+                    "2": cleanFileId
+                })
+            });
+            
+            console.log('✅ Download template with CSV button sent successfully!');
+            return;
+            
+        } else {
+            console.log('⚠️ DOWNLOAD_TEMPLATE_SID not configured, using fallback');
+            throw new Error('Download template not configured');
+        }
+        
+    } catch (templateError) {
+        console.error('❌ Download template failed:', templateError.message);
+        
+        // Fallback to regular text message
         const downloadUrl = `${BASE_URL}/get/${cleanFileId}`;
-        console.log('🚀 Attempting structured WhatsApp message...');
+        console.log('🚀 Using fallback download message...');
+        
         await client.messages.create({
             from: `whatsapp:${fromNumber}`,
             to: to,
@@ -427,75 +495,12 @@ ${downloadUrl}
 ⏰ _Link expires in 2 hours_
 💡 _Tap the link above to download your file_`
         });
-        console.log('✅ Structured WhatsApp message sent!');
         
-    } catch (finalError) {
-        console.error('❌ All template methods failed:', finalError.message);
-        throw finalError;
+        console.log('✅ Fallback download message sent');
     }
 }
 
-// Send interactive message with Export button
-async function sendInteractiveExportMessage(to, batch) {
-    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    const fromNumber = '+16466030424';
-    
-    // Build status message
-    let statusMessage = `💾 *${batch.count} contacts saved so far.*`;
-    
-    if (batch.filesProcessed > 0) {
-        statusMessage += `\n✅ Processed ${batch.filesProcessed} file(s)`;
-    }
-    
-    // Show progress
-    const remaining = MAX_CONTACTS_PER_BATCH - batch.count;
-    if (remaining > 0) {
-        statusMessage += `\n📋 *Note:* Received ${batch.count}/${MAX_CONTACTS_PER_BATCH} contacts (You can send ${remaining} more)`;
-    } else {
-        statusMessage += `\n📋 *Note:* Batch limit reached (${MAX_CONTACTS_PER_BATCH}/${MAX_CONTACTS_PER_BATCH})`;
-    }
-    
-    statusMessage += `\n\nKeep sending more contacts or export when ready`;
-    
-    try {
-        console.log('🚀 Sending interactive message with Export button...');
-        
-        // Send interactive button message
-        await client.messages.create({
-            from: `whatsapp:${fromNumber}`,
-            to: to,
-            body: statusMessage,
-            // Add interactive button using Twilio's button format
-            action: JSON.stringify({
-                buttons: [{
-                    type: 'reply',
-                    reply: {
-                        id: 'export_contacts',
-                        title: 'Export'
-                    }
-                }]
-            })
-        });
-        
-        console.log('✅ Interactive Export button message sent!');
-        
-    } catch (interactiveError) {
-        console.error('❌ Interactive button failed, using TwiML fallback:', interactiveError);
-        
-        // Fallback to simple text message
-        const fallbackMessage = statusMessage + `\n\nType "export" to download your CSV file`;
-        
-        await client.messages.create({
-            from: `whatsapp:${fromNumber}`,
-            to: to,
-            body: fallbackMessage
-        });
-        
-        console.log('✅ Fallback message sent');
-    }
-}
-
-// Interactive Export Button webhook with clean UX
+// Dual Template Export Button webhook
 app.post('/webhook', async (req, res) => {
     const { Body, From, NumMedia, ButtonText, ButtonPayload } = req.body;
     const startTime = Date.now();
@@ -525,9 +530,13 @@ app.post('/webhook', async (req, res) => {
             return;
         }
         
-        // Handle Export button click
-        if (ButtonPayload === 'export_contacts' || ButtonText === 'Export' || Body.toLowerCase() === 'export') {
-            console.log(`📤 Export button clicked or export command received`);
+        // Handle Export button click or export command
+        if (ButtonPayload === 'export_contacts' || 
+            ButtonText === 'Export' || 
+            Body.toLowerCase() === 'export' ||
+            Body === '1️⃣' || Body === '1') {
+            
+            console.log(`📤 Export triggered via: ${ButtonText || ButtonPayload || Body}`);
             const batch = await storage.get(`batch:${From}`);
             
             if (!batch || batch.contacts.length === 0) {
@@ -539,7 +548,7 @@ app.post('/webhook', async (req, res) => {
             
             console.log(`📊 Generating CSV for ${batch.contacts.length} contacts...`);
             
-            // Generate CSV from batch with chunking for large datasets
+            // Generate CSV from batch
             const csvStartTime = Date.now();
             const csv = generateCSV(batch.contacts);
             const csvTime = Date.now() - csvStartTime;
@@ -558,13 +567,11 @@ app.post('/webhook', async (req, res) => {
                 contactCount: batch.contacts.length
             });
             
-            // Send template message with Download CSV button
+            // Send Download Template with CSV Button
             try {
-                console.log('🚀 Sending template message with Download CSV button...');
-                await sendTemplateMessage(From, batch.contacts.length, fileId);
-                console.log('✅ Template message sent successfully!');
-            } catch (templateError) {
-                console.error('❌ Template failed, using TwiML fallback:', templateError);
+                await sendDownloadTemplateMessage(From, batch.contacts.length, fileId);
+            } catch (downloadError) {
+                console.error('❌ Download template failed, using TwiML fallback:', downloadError);
                 
                 const downloadUrl = `${BASE_URL}/get/${fileId}`;
                 twiml.message(`✅ **Your CSV file with ${batch.contacts.length} contacts is ready!**
@@ -689,13 +696,13 @@ ${downloadUrl}
             // Save batch (expires in 20 minutes)
             await storage.set(`batch:${From}`, batch, BATCH_TIMEOUT);
             
-            // Send interactive message with Export button (instead of TwiML)
+            // Send Status Template with Export Button (instead of TwiML)
             try {
-                await sendInteractiveExportMessage(From, batch);
-            } catch (interactiveError) {
-                console.error('❌ Interactive message failed, using TwiML fallback:', interactiveError);
+                await sendStatusTemplateWithExportButton(From, batch);
+            } catch (statusError) {
+                console.error('❌ Status template failed, using TwiML fallback:', statusError);
                 
-                // Fallback to TwiML with simple text
+                // Fallback to TwiML
                 let statusMessage = `💾 *${batch.count} contacts saved so far.*`;
                 
                 if (processedFiles > 0) {
@@ -737,7 +744,7 @@ ${downloadUrl}
 ⚡ **FEATURES:**
 ✅ Auto-batching system
 ✅ Up to 250 contacts per batch
-✅ Interactive Export button
+✅ Interactive Export & Download buttons
 ✅ Works with iPhone & Android
 
 💡 **TIPS:**
@@ -751,13 +758,17 @@ _Ready for your contacts!_`);
         } else if (Body.toLowerCase() === 'test') {
             const fileCount = await getActiveFileCount();
             
-            twiml.message(`✅ **Interactive Export Systems Check Complete**
+            twiml.message(`✅ **Dual Template Systems Check Complete**
 
 🟢 Bot: OPERATIONAL
 🟢 Auto-Batching: ACTIVE
-🟢 Interactive Export Button: ENABLED
-🟢 Template Download: READY
+🟢 Status Template with Export Button: ${STATUS_TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}
+🟢 Download Template with CSV Button: ${DOWNLOAD_TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}
 🟢 Storage: ${redisClient ? 'REDIS OPTIMISED' : 'MEMORY'}
+
+**Template Configuration:**
+📋 Status Template SID: ${STATUS_TEMPLATE_SID || 'Not configured'}
+📥 Download Template SID: ${DOWNLOAD_TEMPLATE_SID || 'Not configured'}
 
 **Performance:**
 📊 Max Contacts: ${MAX_CONTACTS_PER_BATCH}
@@ -768,14 +779,21 @@ _Ready for your contacts!_`);
 **Supported Formats:**
 📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text • 📘 DOCX
 
-_Interactive export system ready!_`);
+_Dual template system ready!_`);
             
         } else if (Body.toLowerCase() === 'testtemplate') {
-            // Test template functionality
+            // Test both templates
             try {
                 const testFileId = 'test-' + Date.now();
-                await sendTemplateMessage(From, 42, testFileId);
-                twiml.message('✅ Template test sent! Check above for Download CSV button.');
+                const testBatch = { count: 42, filesProcessed: 3, contacts: [] };
+                
+                console.log('🧪 Testing Status Template...');
+                await sendStatusTemplateWithExportButton(From, testBatch);
+                
+                console.log('🧪 Testing Download Template...');
+                await sendDownloadTemplateMessage(From, 42, testFileId);
+                
+                twiml.message('✅ Both templates tested! Check above for Export and Download buttons.');
             } catch (error) {
                 twiml.message(`❌ Template test failed: ${error.message}`);
             }
@@ -787,7 +805,7 @@ _Interactive export system ready!_`);
 Send your contact files for instant CSV conversion! 
 
 📱 Works with: iPhone contacts, Android contacts, Excel files
-⚡ Interactive export system with clean buttons
+⚡ Dual template system with Export & Download buttons
 
 💡 Just send your contacts and tap "Export" when done!
 
@@ -859,7 +877,7 @@ app.get('/download/:fileId', async (req, res) => {
                         <h1>❌ File Not Found</h1>
                         <p>This file has expired or doesn't exist.</p>
                         <p>Files are automatically deleted after 2 hours for security.</p>
-                        <p><strong>Interactive Export:</strong> Clean button experience for downloads.</p>
+                        <p><strong>Dual Template System:</strong> Export button → Download CSV button experience.</p>
                     </div>
                 </body>
                 </html>
@@ -922,7 +940,7 @@ app.get('/download/:fileId', async (req, res) => {
     }
 });
 
-// Enhanced health check endpoint with interactive export metrics
+// Enhanced health check endpoint with dual template metrics
 app.get('/', async (req, res) => {
     const fileCount = await getActiveFileCount();
     
@@ -930,7 +948,7 @@ app.get('/', async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>WhatsApp CSV Converter - Interactive Export Edition</title>
+            <title>WhatsApp CSV Converter - Dual Template Edition</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 body {
@@ -951,23 +969,24 @@ app.get('/', async (req, res) => {
                 .metric { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #eee; }
                 .metric:last-child { border-bottom: none; }
                 .performance { background: #e8f5e8; }
-                .interactive { background: #e1f5fe; }
+                .templates { background: #fff3e0; }
                 .green { color: #28a745; font-weight: bold; }
                 .blue { color: #007bff; font-weight: bold; }
                 .orange { color: #fd7e14; font-weight: bold; }
+                .red { color: #dc3545; font-weight: bold; }
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>🚀 WhatsApp CSV Converter - Interactive Export Edition</h1>
+                <h1>🚀 WhatsApp CSV Converter - Dual Template Edition</h1>
                 <h2>Status: ✅ OPERATIONAL</h2>
                 
-                <div class="status interactive">
-                    <h3>🖱️ Interactive Export Features</h3>
-                    <div class="metric"><span>Interactive Export Button:</span><strong class="green">✅ Active</strong></div>
-                    <div class="metric"><span>Clean Button UX:</span><strong class="green">✅ Enabled</strong></div>
-                    <div class="metric"><span>Template Download Button:</span><strong class="green">✅ Ready</strong></div>
-                    <div class="metric"><span>Seamless Contact Collection:</span><strong class="green">✅ Working</strong></div>
+                <div class="status templates">
+                    <h3>📋 Dual Template System</h3>
+                    <div class="metric"><span>Status Template (Export Button):</span><strong class="${STATUS_TEMPLATE_SID ? 'green' : 'red'}">${STATUS_TEMPLATE_SID ? '✅ Configured' : '❌ Missing'}</strong></div>
+                    <div class="metric"><span>Download Template (CSV Button):</span><strong class="${DOWNLOAD_TEMPLATE_SID ? 'green' : 'red'}">${DOWNLOAD_TEMPLATE_SID ? '✅ Configured' : '❌ Missing'}</strong></div>
+                    <div class="metric"><span>Template Fallbacks:</span><strong class="green">✅ Active</strong></div>
+                    <div class="metric"><span>Button Detection:</span><strong class="green">✅ Multi-format</strong></div>
                 </div>
                 
                 <div class="status">
@@ -976,7 +995,7 @@ app.get('/', async (req, res) => {
                     <div class="metric"><span>Memory Optimisation:</span><strong class="green">✅ Enabled</strong></div>
                     <div class="metric"><span>Chunked Storage:</span><strong class="green">✅ Large File Support</strong></div>
                     <div class="metric"><span>Universal Parser:</span><strong class="green">✅ Enhanced</strong></div>
-                    <div class="metric"><span>Template Messages:</span><strong class="green">✅ Working</strong></div>
+                    <div class="metric"><span>Auto-Batching:</span><strong class="green">✅ Seamless</strong></div>
                     <div class="metric"><span>Timeout Protection:</span><strong class="green">✅ 25s Limit</strong></div>
                 </div>
                 
@@ -1007,31 +1026,55 @@ app.get('/', async (req, res) => {
                     <li>📘 <strong>DOCX</strong> - Word documents (enhanced support)</li>
                 </ul>
                 
-                <h3>🖱️ Interactive Export Workflow</h3>
+                <h3>📋 Dual Template Configuration</h3>
+                <div style="background: #f8f9fa; padding: 1rem; border-radius: 5px; font-family: monospace; margin: 1rem 0;">
+                    <strong>Environment Variables Required:</strong><br>
+                    STATUS_TEMPLATE_SID=${STATUS_TEMPLATE_SID || 'HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}<br>
+                    DOWNLOAD_TEMPLATE_SID=${DOWNLOAD_TEMPLATE_SID || 'HXxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
+                </div>
+                
+                <h3>🖱️ Dual Template Workflow</h3>
                 <ol>
                     <li><strong>Send contacts:</strong> User sends contact files via WhatsApp</li>
-                    <li><strong>Auto-batch:</strong> System automatically collects contacts</li>
-                    <li><strong>Interactive response:</strong> User sees Export button</li>
-                    <li><strong>Tap Export:</strong> Clean button triggers export process</li>
-                    <li><strong>Template download:</strong> Receive Download CSV button</li>
-                    <li><strong>Tap Download:</strong> File downloads instantly</li>
+                    <li><strong>Status template:</strong> System sends template with Export button</li>
+                    <li><strong>Tap Export:</strong> User taps Export button in template</li>
+                    <li><strong>Download template:</strong> System sends template with Download CSV button</li>
+                    <li><strong>Tap Download:</strong> User downloads CSV file instantly</li>
                 </ol>
                 
-                <h3>🚀 Latest Interactive Enhancements</h3>
+                <h3>🚀 Template Creation Guide</h3>
+                <div style="background: #e8f5e8; padding: 1rem; border-radius: 5px; margin: 1rem 0;">
+                    <strong>Template 1: Status with Export Button</strong><br>
+                    Name: contact_status_export<br>
+                    Body: 💾 *{{1}} contacts saved so far.*<br>
+                    ✅ Processed {{2}} file(s)<br>
+                    📋 *Note:* Received {{1}}/250 contacts (You can send {{3}} more)<br><br>
+                    Keep sending more contacts or export when ready<br>
+                    Button: [Quick Reply] Export (ID: export_contacts)
+                </div>
+                
+                <div style="background: #e1f5fe; padding: 1rem; border-radius: 5px; margin: 1rem 0;">
+                    <strong>Template 2: Download CSV Button</strong><br>
+                    Name: csv_export_download<br>
+                    Body: ✅ Your CSV file with {{1}} contacts is ready for download!<br>
+                    Button: [Visit Website] Download CSV → https://your-app.railway.app/get/{{2}}
+                </div>
+                
+                <h3>🚀 Latest Dual Template Enhancements</h3>
                 <ul>
-                    <li>✅ <strong>Interactive Export Button:</strong> Clean button instead of emoji text</li>
-                    <li>✅ <strong>Dual Button System:</strong> Export button → Download CSV button</li>
-                    <li>✅ <strong>Enhanced UX:</strong> Professional button experience</li>
+                    <li>✅ <strong>Dual Template System:</strong> Status template → Download template</li>
+                    <li>✅ <strong>Professional Button UX:</strong> Real WhatsApp template buttons</li>
+                    <li>✅ <strong>Fallback Support:</strong> Text commands work if templates fail</li>
+                    <li>✅ <strong>Template Detection:</strong> Handles button clicks and text commands</li>
+                    <li>✅ <strong>Environment Configuration:</strong> Easy template SID management</li>
+                    <li>✅ <strong>Testing Commands:</strong> Test both templates independently</li>
                     <li>✅ <strong>Auto-Collection:</strong> Seamless contact accumulation</li>
-                    <li>✅ <strong>Template Integration:</strong> Download button in template</li>
-                    <li>✅ <strong>Fallback Support:</strong> Text commands work if buttons fail</li>
-                    <li>✅ <strong>Button Detection:</strong> Handles button clicks and text commands</li>
                     <li>✅ <strong>Enhanced Validation:</strong> More permissive contact acceptance</li>
                 </ul>
                 
                 <p style="margin-top: 2rem; color: #666; text-align: center;">
-                    <strong>Interactive Export Edition</strong><br>
-                    Built for professional button experience with ❤️
+                    <strong>Dual Template Edition</strong><br>
+                    Built for professional WhatsApp template experience with ❤️
                 </p>
             </div>
         </body>
@@ -1045,7 +1088,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({
         error: 'Internal server error',
         message: IS_PRODUCTION ? 'Something went wrong' : err.message,
-        performance_note: 'Interactive export mode active'
+        performance_note: 'Dual template mode active'
     });
 });
 
@@ -1075,7 +1118,7 @@ async function getActiveFileCount() {
 // Start server with enhanced logging
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('🚀 OPERATION: INTERACTIVE EXPORT BUTTON - CLEAN UX');
+    console.log('🚀 OPERATION: DUAL TEMPLATE EXPORT SYSTEM - PROFESSIONAL BUTTONS');
     console.log(`📡 Listening on PORT: ${PORT}`);
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected (Optimised)' : 'In-Memory Mode'}`);
@@ -1085,20 +1128,22 @@ app.listen(PORT, () => {
     console.log('   - +2347061240799 (Secondary)');
     console.log('   - +2347034988523 (Tertiary)');
     console.log('   - +2348132474537 (Quaternary)');
-    console.log(`🎯 Template SID: ${TEMPLATE_SID || 'Not configured'}`);
-    console.log('\n🖱️ INTERACTIVE EXPORT FEATURES:');
-    console.log('   ⚡ Interactive Export button instead of emoji text');
-    console.log('   📊 Clean button UX experience');
-    console.log('   🔄 Dual button system: Export → Download CSV');
-    console.log('   📱 Professional template integration');
+    console.log('\n📋 TEMPLATE CONFIGURATION:');
+    console.log(`   📤 Status Template SID: ${STATUS_TEMPLATE_SID || 'NOT CONFIGURED'}`);
+    console.log(`   📥 Download Template SID: ${DOWNLOAD_TEMPLATE_SID || 'NOT CONFIGURED'}`);
+    console.log('\n🖱️ DUAL TEMPLATE FEATURES:');
+    console.log('   ⚡ Professional WhatsApp template buttons');
+    console.log('   📊 Status template with Export button');
+    console.log('   🔄 Download template with CSV button');
+    console.log('   📱 Dual template workflow experience');
     console.log('   💾 Memory optimisation with chunked storage');
     console.log('   ⏱️ Extended batch timeout: 20 minutes');
     console.log('   📁 Large file support: up to 20MB');
     console.log('   🔄 Enhanced error handling and recovery');
     console.log('   ✅ Enhanced validation: accepts name OR phone OR email');
     console.log('   📁 Supported: VCF, CSV, Excel, PDF, Text, DOCX');
-    console.log('\n📋 Interactive export webhook ready at: POST /webhook');
-    console.log('💡 Clean UX: Export button → Download CSV button!');
+    console.log('\n📋 Dual template webhook ready at: POST /webhook');
+    console.log('💡 Professional UX: Status template → Download template!');
 });
 
 // Enhanced cleanup with performance monitoring
