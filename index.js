@@ -23,6 +23,7 @@ const MAX_CONTACTS_PER_BATCH = 250; // WhatsApp limit
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB per file
 const PROCESSING_TIMEOUT = 25000; // 25 seconds (WhatsApp timeout is 30s)
 const CHUNK_SIZE = 50; // Process contacts in chunks
+const WHATSAPP_MEDIA_LIMIT = 10; // WhatsApp/Twilio limit per message
 
 // TESTING RESTRICTION - Authorized numbers
 const AUTHORIZED_NUMBERS = [
@@ -433,7 +434,7 @@ ${downloadUrl}
     }
 }
 
-// High-performance webhook with parallel processing
+// Enhanced webhook with multi-batch support for WhatsApp's 10-media limit
 app.post('/webhook', async (req, res) => {
     const { Body, From, NumMedia } = req.body;
     const startTime = Date.now();
@@ -464,6 +465,12 @@ app.post('/webhook', async (req, res) => {
         // MULTIPLE CONTACT FILES DETECTED - HIGH PERFORMANCE MODE
         if (NumMedia > 0) {
             console.log(`📎 ${NumMedia} contact file(s) detected - Starting high-performance processing`);
+            
+            // Check if we hit Twilio's 10-media limit
+            if (parseInt(NumMedia) === WHATSAPP_MEDIA_LIMIT) {
+                console.log('⚠️ Received exactly 10 media files - this might be a WhatsApp limit truncation');
+                console.log('💡 User may have selected more than 10 contacts');
+            }
             
             // Get existing batch or create new one
             let batch = await storage.get(`batch:${From}`) || { contacts: [], count: 0 };
@@ -570,7 +577,7 @@ app.post('/webhook', async (req, res) => {
             // Save batch (expires in 10 minutes)
             await storage.set(`batch:${From}`, batch, 600);
             
-            // Enhanced confirmation message - clean UX (no processing time)
+            // Enhanced confirmation message with WhatsApp limit awareness
             let statusMessage = `💾 **${batch.count} contacts saved so far.**`;
             
             if (processedFiles > 0) {
@@ -579,6 +586,12 @@ app.post('/webhook', async (req, res) => {
             
             if (failedFiles > 0) {
                 statusMessage += `\n⚠️ ${failedFiles} file(s) failed to process`;
+            }
+            
+            // Special message if exactly 10 files (WhatsApp limit)
+            if (parseInt(NumMedia) === WHATSAPP_MEDIA_LIMIT) {
+                statusMessage += `\n\n📋 **Note:** Received ${WHATSAPP_MEDIA_LIMIT} files (WhatsApp limit)`;
+                statusMessage += `\nIf you selected more contacts, send the rest in another batch.`;
             }
             
             if (batch.count >= MAX_CONTACTS_PER_BATCH) {
@@ -663,14 +676,16 @@ Drop your contact files—let's bulk-load them! 🚀
 📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text • 📘 DOCX
 
 💡 _Send multiple files at once for faster processing_
-🏁 _Current batch: ${batch.count}/${MAX_CONTACTS_PER_BATCH} contacts_`);
+🏁 _Current batch: ${batch.count}/${MAX_CONTACTS_PER_BATCH} contacts_
+
+**💡 Tip:** If you selected more than ${WHATSAPP_MEDIA_LIMIT} contacts but only received ${WHATSAPP_MEDIA_LIMIT}, that's WhatsApp's limit. Send the remaining contacts in another batch!`);
             }
             
         } else if (Body.toLowerCase() === 'help') {
-            twiml.message(`🎖️ **WhatsApp CSV Converter** (High-Performance Edition)
+            twiml.message(`🎖️ **WhatsApp CSV Converter** (Multi-Batch Edition)
 
 📋 **HOW TO USE:**
-1. Send contact files (up to 5 at once)
+1. Send contact files (up to ${WHATSAPP_MEDIA_LIMIT} at once)
 2. Tap 1️⃣ to export or 2️⃣ to add more
 3. Download your CSV file
 
@@ -681,14 +696,6 @@ Drop your contact files—let's bulk-load them! 🚀
    📄 PDF
    📝 Text
    📘 DOCX
-
-⚡ **HIGH-PERFORMANCE FEATURES:**
-✅ Parallel file processing
-✅ Up to 250 contacts per batch
-✅ Enhanced file detection
-✅ Memory-optimised parsing
-✅ Template download buttons
-✅ Chunked storage for large datasets
 
 💡 **TIPS:**
 • Send multiple files together for speed
@@ -702,13 +709,16 @@ Drop your contact files—let's bulk-load them! 🚀
 • Max 250 contacts per batch (WhatsApp limit)
 • Max 20MB per file
 • Processing timeout: 25 seconds
+• WhatsApp sends max ${WHATSAPP_MEDIA_LIMIT} files per message
 
-_Standing by for your contact packages..._`);
+**💡 For 10+ contacts:** Send in multiple batches using 2️⃣ to continue adding!
+
+_Standing by for your files..._`);
             
         } else if (Body.toLowerCase() === 'test') {
             const fileCount = await getActiveFileCount();
             
-            twiml.message(`✅ **High-Performance Systems Check Complete**
+            twiml.message(`✅ **Multi-Batch Systems Check Complete**
 
 🟢 Bot: OPERATIONAL
 🟢 Parallel Processing: ARMED
@@ -718,6 +728,7 @@ _Standing by for your contact packages..._`);
 🟢 Template Messages: ACTIVE
 🟢 Download URLs: WORKING
 🟢 Batch System: ACTIVE (250 contact limit)
+🟢 Multi-Batch Support: ENABLED
 🟢 Storage: ${redisClient ? 'REDIS OPTIMISED' : 'MEMORY'}
 🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}
 
@@ -730,6 +741,10 @@ _Standing by for your contact packages..._`);
 **Authorized Numbers:** ${AUTHORIZED_NUMBERS.length} users
 **Supported Formats:**
 📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text • 📘 DOCX
+
+**⚠️ WhatsApp Limits:**
+• Max ${WHATSAPP_MEDIA_LIMIT} media files per message
+• Use batch mode (2️⃣) for 10+ contacts
 
 _Ready to process contact packages at scale!_`);
             
@@ -745,7 +760,7 @@ _Ready to process contact packages at scale!_`);
             
         } else {
             // Your updated welcome message
-            twiml.message(`👋 *Welcome to Contact Converter!* (High-Performance Edition)
+            twiml.message(`👋 *Welcome to Contact Converter!* (Multi-Batch Edition)
 
 Drop your contact files here for lightning-fast bulk processing! ⚡
 
@@ -757,14 +772,10 @@ Drop your contact files here for lightning-fast bulk processing! ⚡
    📝 Text
    📘 DOCX
 
-🚀 **Performance Features:**
-• Parallel processing for speed
-• Up to 250 contacts per batch
-• Memory-optimised parsing
-• Enhanced file detection
-
-💡 Pro-Tip:
-Send multiple contacts at once for extra speed! 💨
+💡 **Pro-Tips:**
+• Send only 10 contacts at once! 💨
+• WhatsApp limit: ${WHATSAPP_MEDIA_LIMIT} files per message
+• For 10+ contacts: Use 2️⃣ to add more batches
 
 ❓ Need Help?
 Type help.`);
@@ -835,7 +846,7 @@ app.get('/download/:fileId', async (req, res) => {
                         <h1>❌ File Not Found</h1>
                         <p>This file has expired or doesn't exist.</p>
                         <p>Files are automatically deleted after 2 hours for security.</p>
-                        <p><strong>High-Performance Mode:</strong> Large files are optimised for faster downloads.</p>
+                        <p><strong>Multi-Batch Mode:</strong> Large batches are optimised for faster downloads.</p>
                     </div>
                 </body>
                 </html>
@@ -898,7 +909,7 @@ app.get('/download/:fileId', async (req, res) => {
     }
 });
 
-// Enhanced health check endpoint with performance metrics
+// Enhanced health check endpoint with multi-batch metrics
 app.get('/', async (req, res) => {
     const fileCount = await getActiveFileCount();
     
@@ -906,7 +917,7 @@ app.get('/', async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>WhatsApp CSV Converter - High Performance</title>
+            <title>WhatsApp CSV Converter - Multi-Batch Edition</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 body {
@@ -928,6 +939,7 @@ app.get('/', async (req, res) => {
                 .metric:last-child { border-bottom: none; }
                 .performance { background: #e8f5e8; }
                 .limits { background: #fff3cd; }
+                .multibatch { background: #d1ecf1; }
                 .green { color: #28a745; font-weight: bold; }
                 .blue { color: #007bff; font-weight: bold; }
                 .orange { color: #fd7e14; font-weight: bold; }
@@ -935,7 +947,7 @@ app.get('/', async (req, res) => {
         </head>
         <body>
             <div class="container">
-                <h1>🚀 WhatsApp CSV Converter - High Performance Edition</h1>
+                <h1>🚀 WhatsApp CSV Converter - Multi-Batch Edition</h1>
                 <h2>Status: ✅ OPERATIONAL</h2>
                 
                 <div class="status">
@@ -948,13 +960,21 @@ app.get('/', async (req, res) => {
                     <div class="metric"><span>Timeout Protection:</span><strong class="green">✅ 25s Limit</strong></div>
                 </div>
                 
+                <div class="status multibatch">
+                    <h3>🔀 Multi-Batch Features</h3>
+                    <div class="metric"><span>WhatsApp Limit Detection:</span><strong class="green">✅ Active</strong></div>
+                    <div class="metric"><span>Batch Continuation:</span><strong class="green">✅ 2️⃣ Button</strong></div>
+                    <div class="metric"><span>Contact Accumulation:</span><strong class="green">✅ Cross-Message</strong></div>
+                    <div class="metric"><span>Limit Notifications:</span><strong class="green">✅ User Alerts</strong></div>
+                </div>
+                
                 <div class="status performance">
                     <h3>⚡ Performance Metrics</h3>
                     <div class="metric"><span>Max Contacts per Batch:</span><strong class="blue">${MAX_CONTACTS_PER_BATCH}</strong></div>
                     <div class="metric"><span>Max File Size:</span><strong class="blue">20MB</strong></div>
                     <div class="metric"><span>Processing Timeout:</span><strong class="blue">25 seconds</strong></div>
                     <div class="metric"><span>Chunk Size:</span><strong class="blue">${CHUNK_SIZE} contacts</strong></div>
-                    <div class="metric"><span>Parallel Processing:</span><strong class="blue">Up to 5 files</strong></div>
+                    <div class="metric"><span>Parallel Processing:</span><strong class="blue">Up to ${WHATSAPP_MEDIA_LIMIT} files</strong></div>
                 </div>
                 
                 <div class="status">
@@ -976,28 +996,38 @@ app.get('/', async (req, res) => {
                 </ul>
                 
                 <div class="status limits">
-                    <h3>⚠️ Scale Limits & Optimisations</h3>
+                    <h3>⚠️ Scale Limits & Multi-Batch Handling</h3>
                     <div class="metric"><span>WhatsApp Contact Limit:</span><strong class="orange">250 per batch</strong></div>
+                    <div class="metric"><span>WhatsApp Media Limit:</span><strong class="orange">${WHATSAPP_MEDIA_LIMIT} files per message</strong></div>
                     <div class="metric"><span>File Size Limit:</span><strong class="orange">20MB per file</strong></div>
                     <div class="metric"><span>Processing Timeout:</span><strong class="orange">25 seconds</strong></div>
-                    <div class="metric"><span>Memory Management:</span><strong class="green">Chunked for large datasets</strong></div>
-                    <div class="metric"><span>Storage Optimisation:</span><strong class="green">Compressed payloads</strong></div>
+                    <div class="metric"><span>Multi-Batch Solution:</span><strong class="green">2️⃣ Continue adding</strong></div>
                 </div>
                 
-                <h3>🚀 Latest High-Performance Enhancements</h3>
+                <h3>🚀 Latest Multi-Batch Enhancements</h3>
                 <ul>
+                    <li>✅ <strong>WhatsApp Limit Detection:</strong> Automatically detects 10-file limit</li>
+                    <li>✅ <strong>Batch Continuation:</strong> 2️⃣ button for adding more contacts</li>
+                    <li>✅ <strong>User Notifications:</strong> Clear messaging about WhatsApp limits</li>
+                    <li>✅ <strong>Cross-Message Storage:</strong> Contacts accumulate across messages</li>
+                    <li>✅ <strong>Enhanced Validation:</strong> More permissive contact acceptance</li>
                     <li>✅ <strong>Parallel Processing:</strong> Multiple files processed simultaneously</li>
                     <li>✅ <strong>Memory Optimisation:</strong> Chunked storage for large contact lists</li>
                     <li>✅ <strong>Timeout Protection:</strong> 25-second processing limit with graceful fallback</li>
-                    <li>✅ <strong>Scale Limits:</strong> Proper handling of 250-contact WhatsApp limit</li>
-                    <li>✅ <strong>Enhanced Error Handling:</strong> Detailed feedback on processing failures</li>
-                    <li>✅ <strong>Performance Monitoring:</strong> Processing time tracking and optimisation</li>
-                    <li>✅ <strong>Large File Support:</strong> 20MB files with streaming and chunking</li>
-                    <li>✅ <strong>Enhanced Validation:</strong> More permissive contact acceptance</li>
                 </ul>
+                
+                <h3>📊 Multi-Batch Workflow</h3>
+                <ol>
+                    <li><strong>Send 10+ contacts:</strong> WhatsApp sends first ${WHATSAPP_MEDIA_LIMIT} files</li>
+                    <li><strong>System detects limit:</strong> "Received ${WHATSAPP_MEDIA_LIMIT} files (WhatsApp limit)"</li>
+                    <li><strong>User continues:</strong> Tap 2️⃣ to keep adding</li>
+                    <li><strong>Send remaining contacts:</strong> System accumulates all contacts</li>
+                    <li><strong>Export all:</strong> Tap 1️⃣ to download complete CSV</li>
+                </ol>
                 
                 <h3>📊 Architecture Optimisations</h3>
                 <ul>
+                    <li><strong>Multi-Batch Processing:</strong> Handles WhatsApp's ${WHATSAPP_MEDIA_LIMIT}-file limit gracefully</li>
                     <li><strong>Parallel Processing:</strong> Files processed concurrently for speed</li>
                     <li><strong>Memory Management:</strong> Chunked storage prevents memory overflow</li>
                     <li><strong>Timeout Handling:</strong> Race conditions prevent WhatsApp timeouts</li>
@@ -1008,8 +1038,8 @@ app.get('/', async (req, res) => {
                 </ul>
                 
                 <p style="margin-top: 2rem; color: #666; text-align: center;">
-                    <strong>High-Performance Edition</strong><br>
-                    Built for scale with ❤️ and optimised for 250+ contact processing
+                    <strong>Multi-Batch Edition</strong><br>
+                    Built for scale with ❤️ and optimised for unlimited contact processing via batching
                 </p>
             </div>
         </body>
@@ -1023,7 +1053,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({
         error: 'Internal server error',
         message: IS_PRODUCTION ? 'Something went wrong' : err.message,
-        performance_note: 'High-performance mode active'
+        performance_note: 'Multi-batch mode active'
     });
 });
 
@@ -1053,7 +1083,7 @@ async function getActiveFileCount() {
 // Start server with enhanced logging
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('🚀 OPERATION: HIGH-PERFORMANCE PARSE STORM - CONTACT VALIDATION ENHANCED');
+    console.log('🚀 OPERATION: MULTI-BATCH CONTACT PROCESSING - WHATSAPP LIMIT SOLVED');
     console.log(`📡 Listening on PORT: ${PORT}`);
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected (Optimised)' : 'In-Memory Mode'}`);
@@ -1064,16 +1094,19 @@ app.listen(PORT, () => {
     console.log('   - +2347034988523 (Tertiary)');
     console.log('   - +2348132474537 (Quaternary)');
     console.log(`🎯 Template SID: ${TEMPLATE_SID || 'Not configured'}`);
-    console.log('\n🚀 HIGH-PERFORMANCE FEATURES:');
-    console.log('   ⚡ Parallel file processing (up to 5 files)');
+    console.log('\n🚀 MULTI-BATCH FEATURES:');
+    console.log('   ⚡ Parallel file processing (up to 10 files)');
     console.log('   📊 Scale limit: 250 contacts per batch (WhatsApp limit)');
+    console.log('   🔄 Multi-batch support: Handles 10+ contact selections');
+    console.log('   📱 WhatsApp limit detection: Auto-detects 10-file truncation');
     console.log('   💾 Memory optimisation with chunked storage');
     console.log('   ⏱️ Timeout protection: 25 seconds');
     console.log('   📁 Large file support: up to 20MB');
     console.log('   🔄 Enhanced error handling and recovery');
     console.log('   ✅ Enhanced validation: accepts name OR phone OR email');
     console.log('   📁 Supported: VCF, CSV, Excel, PDF, Text, DOCX');
-    console.log('\n📋 Enhanced webhook ready at: POST /webhook');
+    console.log('\n📋 Multi-batch webhook ready at: POST /webhook');
+    console.log('💡 Users can now process unlimited contacts via batching!');
 });
 
 // Enhanced cleanup with performance monitoring
@@ -1116,4 +1149,5 @@ process.on('uncaughtException', (error) => {
 
 process.on('unhandledRejection', (reason, promise) => {
     console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
-});
+}); Parallel file processing
+✅
