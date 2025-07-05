@@ -24,6 +24,7 @@ const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB per file
 const PROCESSING_TIMEOUT = 25000; // 25 seconds (WhatsApp timeout is 30s)
 const CHUNK_SIZE = 50; // Process contacts in chunks
 const WHATSAPP_MEDIA_LIMIT = 10; // WhatsApp/Twilio limit per message
+const BATCH_TIMEOUT = 20 * 60; // 20 minutes batch timeout
 
 // TESTING RESTRICTION - Authorized numbers
 const AUTHORIZED_NUMBERS = [
@@ -384,7 +385,7 @@ async function parseContactFileScalable(fileContent, mediaType, filename) {
     }
 }
 
-// Template Message Function (unchanged but optimised)
+// Template Message Function with Download Button
 async function sendTemplateMessage(to, contactCount, fileId) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
@@ -395,7 +396,7 @@ async function sendTemplateMessage(to, contactCount, fileId) {
     
     try {
         if (TEMPLATE_SID) {
-            console.log('🚀 Attempting WhatsApp Business Template...');
+            console.log('🚀 Attempting WhatsApp Business Template with Download Button...');
             try {
                 await client.messages.create({
                     from: `whatsapp:${fromNumber}`,
@@ -406,7 +407,7 @@ async function sendTemplateMessage(to, contactCount, fileId) {
                         "2": cleanFileId
                     })
                 });
-                console.log('✅ Template message sent successfully!');
+                console.log('✅ Template message with download button sent successfully!');
                 return;
             } catch (templateError) {
                 console.error('❌ Business template failed:', templateError.message);
@@ -434,14 +435,76 @@ ${downloadUrl}
     }
 }
 
-// Enhanced webhook with multi-batch support for WhatsApp's 10-media limit
+// Send interactive message with Export button
+async function sendInteractiveExportMessage(to, batch) {
+    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    const fromNumber = '+16466030424';
+    
+    // Build status message
+    let statusMessage = `💾 *${batch.count} contacts saved so far.*`;
+    
+    if (batch.filesProcessed > 0) {
+        statusMessage += `\n✅ Processed ${batch.filesProcessed} file(s)`;
+    }
+    
+    // Show progress
+    const remaining = MAX_CONTACTS_PER_BATCH - batch.count;
+    if (remaining > 0) {
+        statusMessage += `\n📋 *Note:* Received ${batch.count}/${MAX_CONTACTS_PER_BATCH} contacts (You can send ${remaining} more)`;
+    } else {
+        statusMessage += `\n📋 *Note:* Batch limit reached (${MAX_CONTACTS_PER_BATCH}/${MAX_CONTACTS_PER_BATCH})`;
+    }
+    
+    statusMessage += `\n\nKeep sending more contacts or export when ready`;
+    
+    try {
+        console.log('🚀 Sending interactive message with Export button...');
+        
+        // Send interactive button message
+        await client.messages.create({
+            from: `whatsapp:${fromNumber}`,
+            to: to,
+            body: statusMessage,
+            // Add interactive button using Twilio's button format
+            action: JSON.stringify({
+                buttons: [{
+                    type: 'reply',
+                    reply: {
+                        id: 'export_contacts',
+                        title: 'Export'
+                    }
+                }]
+            })
+        });
+        
+        console.log('✅ Interactive Export button message sent!');
+        
+    } catch (interactiveError) {
+        console.error('❌ Interactive button failed, using TwiML fallback:', interactiveError);
+        
+        // Fallback to simple text message
+        const fallbackMessage = statusMessage + `\n\nType "export" to download your CSV file`;
+        
+        await client.messages.create({
+            from: `whatsapp:${fromNumber}`,
+            to: to,
+            body: fallbackMessage
+        });
+        
+        console.log('✅ Fallback message sent');
+    }
+}
+
+// Interactive Export Button webhook with clean UX
 app.post('/webhook', async (req, res) => {
-    const { Body, From, NumMedia } = req.body;
+    const { Body, From, NumMedia, ButtonText, ButtonPayload } = req.body;
     const startTime = Date.now();
     
     console.log('📨 INCOMING TRANSMISSION:', new Date().toISOString());
     console.log('From:', From);
     console.log('Message:', Body);
+    console.log('Button Text:', ButtonText);
+    console.log('Button Payload:', ButtonPayload);
     console.log('Attachments:', NumMedia);
     
     // Log all media info for debugging
@@ -462,18 +525,66 @@ app.post('/webhook', async (req, res) => {
             return;
         }
         
-        // MULTIPLE CONTACT FILES DETECTED - HIGH PERFORMANCE MODE
-        if (NumMedia > 0) {
-            console.log(`📎 ${NumMedia} contact file(s) detected - Starting high-performance processing`);
+        // Handle Export button click
+        if (ButtonPayload === 'export_contacts' || ButtonText === 'Export' || Body.toLowerCase() === 'export') {
+            console.log(`📤 Export button clicked or export command received`);
+            const batch = await storage.get(`batch:${From}`);
             
-            // Check if we hit Twilio's 10-media limit
-            if (parseInt(NumMedia) === WHATSAPP_MEDIA_LIMIT) {
-                console.log('⚠️ Received exactly 10 media files - this might be a WhatsApp limit truncation');
-                console.log('💡 User may have selected more than 10 contacts');
+            if (!batch || batch.contacts.length === 0) {
+                twiml.message(`❌ No contacts to export.\n\nSend some contact files first!`);
+                res.type('text/xml');
+                res.send(twiml.toString());
+                return;
             }
             
+            console.log(`📊 Generating CSV for ${batch.contacts.length} contacts...`);
+            
+            // Generate CSV from batch with chunking for large datasets
+            const csvStartTime = Date.now();
+            const csv = generateCSV(batch.contacts);
+            const csvTime = Date.now() - csvStartTime;
+            
+            console.log(`📝 CSV generated in ${csvTime}ms (${(csv.length / 1024).toFixed(2)}KB)`);
+            
+            // Create secure file with clean UUID
+            const fileId = uuidv4();
+            console.log(`📝 Creating file with clean ID: ${fileId}`);
+            
+            await storage.set(`file:${fileId}`, {
+                content: csv,
+                filename: `contacts_${Date.now()}.csv`,
+                from: From,
+                created: Date.now(),
+                contactCount: batch.contacts.length
+            });
+            
+            // Send template message with Download CSV button
+            try {
+                console.log('🚀 Sending template message with Download CSV button...');
+                await sendTemplateMessage(From, batch.contacts.length, fileId);
+                console.log('✅ Template message sent successfully!');
+            } catch (templateError) {
+                console.error('❌ Template failed, using TwiML fallback:', templateError);
+                
+                const downloadUrl = `${BASE_URL}/get/${fileId}`;
+                twiml.message(`✅ **Your CSV file with ${batch.contacts.length} contacts is ready!**
+
+📎 *Download CSV*
+${downloadUrl}
+
+⏰ _Link expires in 2 hours_
+💡 _Tap the link above to download your file_`);
+            }
+            
+            // Clear batch after export
+            await storage.del(`batch:${From}`);
+            
+        } else if (NumMedia > 0) {
+            // AUTO-BATCH CONTACT PROCESSING
+            console.log(`📎 ${NumMedia} contact file(s) detected - Starting auto-batch processing`);
+            
             // Get existing batch or create new one
-            let batch = await storage.get(`batch:${From}`) || { contacts: [], count: 0 };
+            let batch = await storage.get(`batch:${From}`) || { contacts: [], count: 0, filesProcessed: 0 };
             let totalNewContacts = 0;
             let processedFiles = 0;
             let failedFiles = 0;
@@ -572,122 +683,48 @@ app.post('/webhook', async (req, res) => {
             
             // Update batch totals
             batch.count = batch.contacts.length;
+            batch.filesProcessed += processedFiles;
             batch.lastUpdated = Date.now();
             
-            // Save batch (expires in 10 minutes)
-            await storage.set(`batch:${From}`, batch, 600);
+            // Save batch (expires in 20 minutes)
+            await storage.set(`batch:${From}`, batch, BATCH_TIMEOUT);
             
-            // Enhanced confirmation message with WhatsApp limit awareness
-            let statusMessage = `💾 **${batch.count} contacts saved so far.**`;
-            
-            if (processedFiles > 0) {
-                statusMessage += `\n\n✅ Processed ${processedFiles} file(s): +${totalNewContacts} contacts`;
-            }
-            
-            if (failedFiles > 0) {
-                statusMessage += `\n⚠️ ${failedFiles} file(s) failed to process`;
-            }
-            
-            // Special message if exactly 10 files (WhatsApp limit)
-            if (parseInt(NumMedia) === WHATSAPP_MEDIA_LIMIT) {
-                statusMessage += `\n\n📋 **Note:** Received ${WHATSAPP_MEDIA_LIMIT} files (WhatsApp limit)`;
-                statusMessage += `\nIf you selected more contacts, send the rest in another batch.`;
-            }
-            
-            if (batch.count >= MAX_CONTACTS_PER_BATCH) {
-                statusMessage += `\n\n📏 **Batch limit reached (${MAX_CONTACTS_PER_BATCH} contacts)**`;
-                statusMessage += `\nTap 1️⃣ to export • Ready for download`;
-            } else {
-                statusMessage += `\n\nTap 1️⃣ to export • 2️⃣ to keep adding`;
-            }
-            
-            twiml.message(statusMessage);
-            
-        } else if (Body === '1️⃣' || Body === '1') {
-            // Export current batch with performance optimisation
-            console.log(`📤 Export request initiated`);
-            const batch = await storage.get(`batch:${From}`);
-            
-            if (!batch || batch.contacts.length === 0) {
-                twiml.message(`❌ No contacts to export.\n\nSend some contact files first!`);
-                res.type('text/xml');
-                res.send(twiml.toString());
-                return;
-            }
-            
-            console.log(`📊 Generating CSV for ${batch.contacts.length} contacts...`);
-            
-            // Generate CSV from batch with chunking for large datasets
-            const csvStartTime = Date.now();
-            const csv = generateCSV(batch.contacts);
-            const csvTime = Date.now() - csvStartTime;
-            
-            console.log(`📝 CSV generated in ${csvTime}ms (${(csv.length / 1024).toFixed(2)}KB)`);
-            
-            // Create secure file with clean UUID
-            const fileId = uuidv4();
-            console.log(`📝 Creating file with clean ID: ${fileId}`);
-            
-            await storage.set(`file:${fileId}`, {
-                content: csv,
-                filename: `contacts_${Date.now()}.csv`,
-                from: From,
-                created: Date.now(),
-                contactCount: batch.contacts.length
-            });
-            
-            // Try enhanced template message first
+            // Send interactive message with Export button (instead of TwiML)
             try {
-                console.log('🚀 Sending enhanced template message...');
-                await sendTemplateMessage(From, batch.contacts.length, fileId);
-                console.log('✅ Template message sent successfully!');
-            } catch (templateError) {
-                console.error('❌ Template failed, using TwiML fallback:', templateError);
+                await sendInteractiveExportMessage(From, batch);
+            } catch (interactiveError) {
+                console.error('❌ Interactive message failed, using TwiML fallback:', interactiveError);
                 
-                const downloadUrl = `${BASE_URL}/get/${fileId}`;
-                twiml.message(`✅ **Your CSV file with ${batch.contacts.length} contacts is ready!**
-
-📎 *Download CSV*
-${downloadUrl}
-
-⏰ _Link expires in 2 hours_
-💡 _Tap the link above to download your file_`);
-            }
-            
-            // Clear batch after export
-            await storage.del(`batch:${From}`);
-            
-        } else if (Body === '2️⃣' || Body === '2') {
-            const batch = await storage.get(`batch:${From}`) || { contacts: [], count: 0 };
-            const remaining = MAX_CONTACTS_PER_BATCH - batch.count;
-            
-            if (remaining <= 0) {
-                twiml.message(`📏 **Batch limit reached!**
-
-You've hit the ${MAX_CONTACTS_PER_BATCH} contact limit.
-
-Tap 1️⃣ to export current batch, then start a new one.`);
-            } else {
-                twiml.message(`📨 **Ready for more files!** (${remaining} slots remaining)
-
-Drop your contact files—let's bulk-load them! 🚀
-
-📂 **Supported formats:**
-📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text • 📘 DOCX
-
-💡 _Send multiple files at once for faster processing_
-🏁 _Current batch: ${batch.count}/${MAX_CONTACTS_PER_BATCH} contacts_
-
-**💡 Tip:** If you selected more than ${WHATSAPP_MEDIA_LIMIT} contacts but only received ${WHATSAPP_MEDIA_LIMIT}, that's WhatsApp's limit. Send the remaining contacts in another batch!`);
+                // Fallback to TwiML with simple text
+                let statusMessage = `💾 *${batch.count} contacts saved so far.*`;
+                
+                if (processedFiles > 0) {
+                    statusMessage += `\n✅ Processed ${processedFiles} file(s): +${totalNewContacts} contacts`;
+                }
+                
+                if (failedFiles > 0) {
+                    statusMessage += `\n⚠️ ${failedFiles} file(s) failed to process`;
+                }
+                
+                const remaining = MAX_CONTACTS_PER_BATCH - batch.count;
+                if (remaining > 0) {
+                    statusMessage += `\n📋 *Note:* Received ${batch.count}/${MAX_CONTACTS_PER_BATCH} contacts (You can send ${remaining} more)`;
+                } else {
+                    statusMessage += `\n📋 *Note:* Batch limit reached (${MAX_CONTACTS_PER_BATCH}/${MAX_CONTACTS_PER_BATCH})`;
+                }
+                
+                statusMessage += `\n\nKeep sending more contacts or type "export" when ready`;
+                
+                twiml.message(statusMessage);
             }
             
         } else if (Body.toLowerCase() === 'help') {
-            twiml.message(`🎖️ **WhatsApp CSV Converter** (Multi-Batch Edition)
+            twiml.message(`🎖️ **WhatsApp CSV Converter**
 
 📋 **HOW TO USE:**
-1. Send contact files (up to ${WHATSAPP_MEDIA_LIMIT} at once)
-2. Tap 1️⃣ to export or 2️⃣ to add more
-3. Download your CSV file
+1. Send your contact files
+2. Keep sending more if needed
+3. Tap "Export" button when done
 
 📂 **Supported Formats:**
    📇 VCF (phone contacts)
@@ -697,88 +734,64 @@ Drop your contact files—let's bulk-load them! 🚀
    📝 Text
    📘 DOCX
 
+⚡ **FEATURES:**
+✅ Auto-batching system
+✅ Up to 250 contacts per batch
+✅ Interactive Export button
+✅ Works with iPhone & Android
+
 💡 **TIPS:**
-• Send multiple files together for speed
-• Works with iPhone & Android exports
-• PDF contact lists supported
-• Word documents with contact data
-• Text files with contact patterns
-• Optimised for bulk processing
+• Send multiple files at once
+• WhatsApp sends 10 files max per message
+• Just keep sending - system auto-batches
+• Tap "Export" button to download CSV
 
-🏁 **LIMITS:**
-• Max 250 contacts per batch (WhatsApp limit)
-• Max 20MB per file
-• Processing timeout: 25 seconds
-• WhatsApp sends max ${WHATSAPP_MEDIA_LIMIT} files per message
-
-**💡 For 10+ contacts:** Send in multiple batches using 2️⃣ to continue adding!
-
-_Standing by for your files..._`);
+_Ready for your contacts!_`);
             
         } else if (Body.toLowerCase() === 'test') {
             const fileCount = await getActiveFileCount();
             
-            twiml.message(`✅ **Multi-Batch Systems Check Complete**
+            twiml.message(`✅ **Interactive Export Systems Check Complete**
 
 🟢 Bot: OPERATIONAL
-🟢 Parallel Processing: ARMED
-🟢 Memory Optimisation: ACTIVE
-🟢 Chunked Storage: ENABLED
-🟢 Universal Parser: ENHANCED
-🟢 Template Messages: ACTIVE
-🟢 Download URLs: WORKING
-🟢 Batch System: ACTIVE (250 contact limit)
-🟢 Multi-Batch Support: ENABLED
+🟢 Auto-Batching: ACTIVE
+🟢 Interactive Export Button: ENABLED
+🟢 Template Download: READY
 🟢 Storage: ${redisClient ? 'REDIS OPTIMISED' : 'MEMORY'}
-🟢 Mode: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}
 
-**Performance Metrics:**
+**Performance:**
 📊 Max Contacts: ${MAX_CONTACTS_PER_BATCH}
 📁 Max File Size: 20MB
-⏱️ Processing Timeout: 25s
+⏱️ Batch Timeout: ${BATCH_TIMEOUT / 60} minutes
 🗃️ Active Files: ${fileCount}
 
-**Authorized Numbers:** ${AUTHORIZED_NUMBERS.length} users
 **Supported Formats:**
 📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text • 📘 DOCX
 
-**⚠️ WhatsApp Limits:**
-• Max ${WHATSAPP_MEDIA_LIMIT} media files per message
-• Use batch mode (2️⃣) for 10+ contacts
-
-_Ready to process contact packages at scale!_`);
+_Interactive export system ready!_`);
             
         } else if (Body.toLowerCase() === 'testtemplate') {
             // Test template functionality
             try {
                 const testFileId = 'test-' + Date.now();
                 await sendTemplateMessage(From, 42, testFileId);
-                twiml.message('✅ Template test sent! Check above for template message.');
+                twiml.message('✅ Template test sent! Check above for Download CSV button.');
             } catch (error) {
                 twiml.message(`❌ Template test failed: ${error.message}`);
             }
             
         } else {
-            // Your updated welcome message
-            twiml.message(`👋 *Welcome to Contact Converter!* (Multi-Batch Edition)
+            // Welcome message
+            twiml.message(`👋 **Welcome to Contact Converter!**
 
-Drop your contact files here for lightning-fast bulk processing! ⚡
+Send your contact files for instant CSV conversion! 
 
-📂 Supported Formats:
-   📇 VCF (phone contacts)
-   📊 CSV
-   📗 Excel
-   📄 PDF
-   📝 Text
-   📘 DOCX
+📱 Works with: iPhone contacts, Android contacts, Excel files
+⚡ Interactive export system with clean buttons
 
-💡 **Pro-Tips:**
-• Send only 10 contacts at once! 💨
-• WhatsApp limit: ${WHATSAPP_MEDIA_LIMIT} files per message
-• For 10+ contacts: Use 2️⃣ to add more batches
+💡 Just send your contacts and tap "Export" when done!
 
-❓ Need Help?
-Type help.`);
+Type "help" for more info.`);
         }
         
     } catch (error) {
@@ -846,7 +859,7 @@ app.get('/download/:fileId', async (req, res) => {
                         <h1>❌ File Not Found</h1>
                         <p>This file has expired or doesn't exist.</p>
                         <p>Files are automatically deleted after 2 hours for security.</p>
-                        <p><strong>Multi-Batch Mode:</strong> Large batches are optimised for faster downloads.</p>
+                        <p><strong>Interactive Export:</strong> Clean button experience for downloads.</p>
                     </div>
                 </body>
                 </html>
@@ -909,7 +922,7 @@ app.get('/download/:fileId', async (req, res) => {
     }
 });
 
-// Enhanced health check endpoint with multi-batch metrics
+// Enhanced health check endpoint with interactive export metrics
 app.get('/', async (req, res) => {
     const fileCount = await getActiveFileCount();
     
@@ -917,7 +930,7 @@ app.get('/', async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>WhatsApp CSV Converter - Multi-Batch Edition</title>
+            <title>WhatsApp CSV Converter - Interactive Export Edition</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 body {
@@ -938,8 +951,7 @@ app.get('/', async (req, res) => {
                 .metric { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #eee; }
                 .metric:last-child { border-bottom: none; }
                 .performance { background: #e8f5e8; }
-                .limits { background: #fff3cd; }
-                .multibatch { background: #d1ecf1; }
+                .interactive { background: #e1f5fe; }
                 .green { color: #28a745; font-weight: bold; }
                 .blue { color: #007bff; font-weight: bold; }
                 .orange { color: #fd7e14; font-weight: bold; }
@@ -947,8 +959,16 @@ app.get('/', async (req, res) => {
         </head>
         <body>
             <div class="container">
-                <h1>🚀 WhatsApp CSV Converter - Multi-Batch Edition</h1>
+                <h1>🚀 WhatsApp CSV Converter - Interactive Export Edition</h1>
                 <h2>Status: ✅ OPERATIONAL</h2>
+                
+                <div class="status interactive">
+                    <h3>🖱️ Interactive Export Features</h3>
+                    <div class="metric"><span>Interactive Export Button:</span><strong class="green">✅ Active</strong></div>
+                    <div class="metric"><span>Clean Button UX:</span><strong class="green">✅ Enabled</strong></div>
+                    <div class="metric"><span>Template Download Button:</span><strong class="green">✅ Ready</strong></div>
+                    <div class="metric"><span>Seamless Contact Collection:</span><strong class="green">✅ Working</strong></div>
+                </div>
                 
                 <div class="status">
                     <h3>🔥 High-Performance Features</h3>
@@ -960,20 +980,12 @@ app.get('/', async (req, res) => {
                     <div class="metric"><span>Timeout Protection:</span><strong class="green">✅ 25s Limit</strong></div>
                 </div>
                 
-                <div class="status multibatch">
-                    <h3>🔀 Multi-Batch Features</h3>
-                    <div class="metric"><span>WhatsApp Limit Detection:</span><strong class="green">✅ Active</strong></div>
-                    <div class="metric"><span>Batch Continuation:</span><strong class="green">✅ 2️⃣ Button</strong></div>
-                    <div class="metric"><span>Contact Accumulation:</span><strong class="green">✅ Cross-Message</strong></div>
-                    <div class="metric"><span>Limit Notifications:</span><strong class="green">✅ User Alerts</strong></div>
-                </div>
-                
                 <div class="status performance">
                     <h3>⚡ Performance Metrics</h3>
                     <div class="metric"><span>Max Contacts per Batch:</span><strong class="blue">${MAX_CONTACTS_PER_BATCH}</strong></div>
                     <div class="metric"><span>Max File Size:</span><strong class="blue">20MB</strong></div>
                     <div class="metric"><span>Processing Timeout:</span><strong class="blue">25 seconds</strong></div>
-                    <div class="metric"><span>Chunk Size:</span><strong class="blue">${CHUNK_SIZE} contacts</strong></div>
+                    <div class="metric"><span>Batch Timeout:</span><strong class="blue">${BATCH_TIMEOUT / 60} minutes</strong></div>
                     <div class="metric"><span>Parallel Processing:</span><strong class="blue">Up to ${WHATSAPP_MEDIA_LIMIT} files</strong></div>
                 </div>
                 
@@ -995,51 +1007,31 @@ app.get('/', async (req, res) => {
                     <li>📘 <strong>DOCX</strong> - Word documents (enhanced support)</li>
                 </ul>
                 
-                <div class="status limits">
-                    <h3>⚠️ Scale Limits & Multi-Batch Handling</h3>
-                    <div class="metric"><span>WhatsApp Contact Limit:</span><strong class="orange">250 per batch</strong></div>
-                    <div class="metric"><span>WhatsApp Media Limit:</span><strong class="orange">${WHATSAPP_MEDIA_LIMIT} files per message</strong></div>
-                    <div class="metric"><span>File Size Limit:</span><strong class="orange">20MB per file</strong></div>
-                    <div class="metric"><span>Processing Timeout:</span><strong class="orange">25 seconds</strong></div>
-                    <div class="metric"><span>Multi-Batch Solution:</span><strong class="green">2️⃣ Continue adding</strong></div>
-                </div>
-                
-                <h3>🚀 Latest Multi-Batch Enhancements</h3>
-                <ul>
-                    <li>✅ <strong>WhatsApp Limit Detection:</strong> Automatically detects 10-file limit</li>
-                    <li>✅ <strong>Batch Continuation:</strong> 2️⃣ button for adding more contacts</li>
-                    <li>✅ <strong>User Notifications:</strong> Clear messaging about WhatsApp limits</li>
-                    <li>✅ <strong>Cross-Message Storage:</strong> Contacts accumulate across messages</li>
-                    <li>✅ <strong>Enhanced Validation:</strong> More permissive contact acceptance</li>
-                    <li>✅ <strong>Parallel Processing:</strong> Multiple files processed simultaneously</li>
-                    <li>✅ <strong>Memory Optimisation:</strong> Chunked storage for large contact lists</li>
-                    <li>✅ <strong>Timeout Protection:</strong> 25-second processing limit with graceful fallback</li>
-                </ul>
-                
-                <h3>📊 Multi-Batch Workflow</h3>
+                <h3>🖱️ Interactive Export Workflow</h3>
                 <ol>
-                    <li><strong>Send 10+ contacts:</strong> WhatsApp sends first ${WHATSAPP_MEDIA_LIMIT} files</li>
-                    <li><strong>System detects limit:</strong> "Received ${WHATSAPP_MEDIA_LIMIT} files (WhatsApp limit)"</li>
-                    <li><strong>User continues:</strong> Tap 2️⃣ to keep adding</li>
-                    <li><strong>Send remaining contacts:</strong> System accumulates all contacts</li>
-                    <li><strong>Export all:</strong> Tap 1️⃣ to download complete CSV</li>
+                    <li><strong>Send contacts:</strong> User sends contact files via WhatsApp</li>
+                    <li><strong>Auto-batch:</strong> System automatically collects contacts</li>
+                    <li><strong>Interactive response:</strong> User sees Export button</li>
+                    <li><strong>Tap Export:</strong> Clean button triggers export process</li>
+                    <li><strong>Template download:</strong> Receive Download CSV button</li>
+                    <li><strong>Tap Download:</strong> File downloads instantly</li>
                 </ol>
                 
-                <h3>📊 Architecture Optimisations</h3>
+                <h3>🚀 Latest Interactive Enhancements</h3>
                 <ul>
-                    <li><strong>Multi-Batch Processing:</strong> Handles WhatsApp's ${WHATSAPP_MEDIA_LIMIT}-file limit gracefully</li>
-                    <li><strong>Parallel Processing:</strong> Files processed concurrently for speed</li>
-                    <li><strong>Memory Management:</strong> Chunked storage prevents memory overflow</li>
-                    <li><strong>Timeout Handling:</strong> Race conditions prevent WhatsApp timeouts</li>
-                    <li><strong>Payload Compression:</strong> Large contact lists stored efficiently</li>
-                    <li><strong>Streaming Downloads:</strong> Large CSV files downloaded optimally</li>
-                    <li><strong>UTF-8 BOM:</strong> Excel compatibility for international characters</li>
-                    <li><strong>Enhanced Validation:</strong> Accepts contacts with name OR phone OR email</li>
+                    <li>✅ <strong>Interactive Export Button:</strong> Clean button instead of emoji text</li>
+                    <li>✅ <strong>Dual Button System:</strong> Export button → Download CSV button</li>
+                    <li>✅ <strong>Enhanced UX:</strong> Professional button experience</li>
+                    <li>✅ <strong>Auto-Collection:</strong> Seamless contact accumulation</li>
+                    <li>✅ <strong>Template Integration:</strong> Download button in template</li>
+                    <li>✅ <strong>Fallback Support:</strong> Text commands work if buttons fail</li>
+                    <li>✅ <strong>Button Detection:</strong> Handles button clicks and text commands</li>
+                    <li>✅ <strong>Enhanced Validation:</strong> More permissive contact acceptance</li>
                 </ul>
                 
                 <p style="margin-top: 2rem; color: #666; text-align: center;">
-                    <strong>Multi-Batch Edition</strong><br>
-                    Built for scale with ❤️ and optimised for unlimited contact processing via batching
+                    <strong>Interactive Export Edition</strong><br>
+                    Built for professional button experience with ❤️
                 </p>
             </div>
         </body>
@@ -1053,7 +1045,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({
         error: 'Internal server error',
         message: IS_PRODUCTION ? 'Something went wrong' : err.message,
-        performance_note: 'Multi-batch mode active'
+        performance_note: 'Interactive export mode active'
     });
 });
 
@@ -1083,7 +1075,7 @@ async function getActiveFileCount() {
 // Start server with enhanced logging
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log('🚀 OPERATION: MULTI-BATCH CONTACT PROCESSING - WHATSAPP LIMIT SOLVED');
+    console.log('🚀 OPERATION: INTERACTIVE EXPORT BUTTON - CLEAN UX');
     console.log(`📡 Listening on PORT: ${PORT}`);
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected (Optimised)' : 'In-Memory Mode'}`);
@@ -1094,19 +1086,19 @@ app.listen(PORT, () => {
     console.log('   - +2347034988523 (Tertiary)');
     console.log('   - +2348132474537 (Quaternary)');
     console.log(`🎯 Template SID: ${TEMPLATE_SID || 'Not configured'}`);
-    console.log('\n🚀 MULTI-BATCH FEATURES:');
-    console.log('   ⚡ Parallel file processing (up to 10 files)');
-    console.log('   📊 Scale limit: 250 contacts per batch (WhatsApp limit)');
-    console.log('   🔄 Multi-batch support: Handles 10+ contact selections');
-    console.log('   📱 WhatsApp limit detection: Auto-detects 10-file truncation');
+    console.log('\n🖱️ INTERACTIVE EXPORT FEATURES:');
+    console.log('   ⚡ Interactive Export button instead of emoji text');
+    console.log('   📊 Clean button UX experience');
+    console.log('   🔄 Dual button system: Export → Download CSV');
+    console.log('   📱 Professional template integration');
     console.log('   💾 Memory optimisation with chunked storage');
-    console.log('   ⏱️ Timeout protection: 25 seconds');
+    console.log('   ⏱️ Extended batch timeout: 20 minutes');
     console.log('   📁 Large file support: up to 20MB');
     console.log('   🔄 Enhanced error handling and recovery');
     console.log('   ✅ Enhanced validation: accepts name OR phone OR email');
     console.log('   📁 Supported: VCF, CSV, Excel, PDF, Text, DOCX');
-    console.log('\n📋 Multi-batch webhook ready at: POST /webhook');
-    console.log('💡 Users can now process unlimited contacts via batching!');
+    console.log('\n📋 Interactive export webhook ready at: POST /webhook');
+    console.log('💡 Clean UX: Export button → Download CSV button!');
 });
 
 // Enhanced cleanup with performance monitoring
