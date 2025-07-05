@@ -430,7 +430,7 @@ async function sendStatusTemplateWithExportButton(to, batch) {
         }
         
         if (remaining > 0) {
-            statusMessage += `\n📋 *Note:* Received ${batch.count}/${MAX_CONTACTS_PER_BATCH} contacts (You can send ${remaining} more)`;
+            statusMessage += `\n📋 *Note:* Received ${batch.count}/${MAX_CONTACTS_PER_BATCH} contacts`;
         } else {
             statusMessage += `\n📋 *Note:* Batch limit reached (${MAX_CONTACTS_PER_BATCH}/${MAX_CONTACTS_PER_BATCH})`;
         }
