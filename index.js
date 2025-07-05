@@ -1048,7 +1048,7 @@ app.get('/', async (req, res) => {
                     Name: contact_status_export<br>
                     Body: 💾 *{{1}} contacts saved so far.*<br>
                     ✅ Processed {{2}} file(s)<br>
-                    📋 *Note:* Received {{1}}/250 contacts (You can send {{3}} more)<br><br>
+                    📋 *Note:* Received {{1}}/250 contacts <br><br>
                     Keep sending more contacts or export when ready<br>
                     Button: [Quick Reply] Export (ID: export_contacts)
                 </div>
