@@ -31,6 +31,7 @@ const AUTHORIZED_NUMBERS = [
     '+2348121364213', // Your personal number
     '+2347061240799',  // New authorized number
     '+2347034988523', // New authorized number
+    '+2349065729552', // New authorized number
     '+2348132474537'  // New authorized number
 ];
 
