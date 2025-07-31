@@ -23,8 +23,17 @@ class Store {
         } else {
           console.error('Redis connection error occurred');
         }
+        // Disable Redis on connection failure to prevent hanging operations
+        this.redis = null;
+        console.log('🔄 SESSION-STORE: Falling back to memory storage due to Redis error');
       });
-      this.redis.connect();
+      
+      try {
+        this.redis.connect();
+      } catch (connectError) {
+        console.error('Redis connection failed, falling back to memory:', connectError);
+        this.redis = null;
+      }
     }
   }
 
