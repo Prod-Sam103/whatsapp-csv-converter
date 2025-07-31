@@ -1143,9 +1143,12 @@ _Dual template system ready!_`);
                     
                     // Send interactive template with buttons or fallback
                     try {
+                        console.log('📝 About to call sendPlainTextContactTemplate...');
                         await sendPlainTextContactTemplate(From, extractedContacts.length, extractedContacts, totalCount);
+                        console.log('📝 sendPlainTextContactTemplate completed successfully');
                     } catch (templateError) {
                         console.error('📝 Plain text template failed, using TwiML fallback:', templateError);
+                        console.error('📝 Template error stack:', templateError.stack);
                         
                         // Fallback to TwiML message
                         let previewMessage = `📝 **Found ${extractedContacts.length} contact(s) in your message!**\n\n`;
@@ -1225,6 +1228,8 @@ Please try again or contact support.
 Type "help" for assistance.`);
     }
     
+    console.log('📤 About to send TwiML response...');
+    console.log('📤 TwiML content:', twiml.toString());
     res.type('text/xml');
     res.send(twiml.toString());
 });
