@@ -985,6 +985,36 @@ _Dual template system ready!_`);
                 twiml.message(`❌ Template test failed: ${error.message}`);
             }
             
+        } else if (Body && Body.toLowerCase() === 'preview') {
+            // PREVIEW BATCH CONTENTS using session store
+            console.log(`🌟 PREVIEW BRANCH TRIGGERED for ${From}`);
+            const cleanPhone = From.replace('whatsapp:', '');
+            const contacts = await store.get(`contacts:${cleanPhone}`) || [];
+            
+            if (contacts.length === 0) {
+                twiml.message(`📝 **No contacts in your batch yet.**\n\nSend contact files or plain text messages with contact details to get started!`);
+            } else {
+                let previewMessage = `📋 **Batch Preview (${contacts.length} contacts):**\n\n`;
+                
+                // Show all contacts (limit to 20 for WhatsApp message limits)
+                const contactsToShow = contacts.slice(0, 20);
+                contactsToShow.forEach((contact, index) => {
+                    previewMessage += `${index + 1}. **${contact.name || 'Contact'}**\n`;
+                    if (contact.mobile) previewMessage += `   📱 ${contact.mobile}\n`;
+                    if (contact.email) previewMessage += `   📧 ${contact.email}\n`;
+                    previewMessage += `\n`;
+                });
+                
+                if (contacts.length > 20) {
+                    previewMessage += `... and ${contacts.length - 20} more contacts\n\n`;
+                }
+                
+                previewMessage += `📤 Type "export" to download CSV\n`;
+                previewMessage += `➕ Send more contacts to add them`;
+                
+                twiml.message(previewMessage);
+            }
+            
         } else if (Body && Body.trim() && (NumMedia === 0 || NumMedia === '0')) {
             // PLAIN TEXT CONTACT EXTRACTION
             console.log(`🌟 PLAIN TEXT BRANCH TRIGGERED for ${From}`);
@@ -1067,35 +1097,6 @@ _Dual template system ready!_`);
                 
                 // Fallback to welcome message
                 twiml.message(`👋 **Welcome to Contact Converter!**\n\nSend your contact files or plain text with contact details!\n\n📱 Works with: iPhone contacts, Android contacts, Excel files\n⚡ Enhanced text parsing for event planners\n\n💡 Just send your contacts and tap "Export" when done!\n\nType "help" for more info.`);
-            }
-            
-        } else if (Body && Body.toLowerCase() === 'preview') {
-            // PREVIEW BATCH CONTENTS using session store
-            const cleanPhone = From.replace('whatsapp:', '');
-            const contacts = await store.get(`contacts:${cleanPhone}`) || [];
-            
-            if (contacts.length === 0) {
-                twiml.message(`📝 **No contacts in your batch yet.**\n\nSend contact files or plain text messages with contact details to get started!`);
-            } else {
-                let previewMessage = `📋 **Batch Preview (${contacts.length} contacts):**\n\n`;
-                
-                // Show all contacts (limit to 20 for WhatsApp message limits)
-                const contactsToShow = contacts.slice(0, 20);
-                contactsToShow.forEach((contact, index) => {
-                    previewMessage += `${index + 1}. **${contact.name || 'Contact'}**\n`;
-                    if (contact.mobile) previewMessage += `   📱 ${contact.mobile}\n`;
-                    if (contact.email) previewMessage += `   📧 ${contact.email}\n`;
-                    previewMessage += `\n`;
-                });
-                
-                if (contacts.length > 20) {
-                    previewMessage += `... and ${contacts.length - 20} more contacts\n\n`;
-                }
-                
-                previewMessage += `📤 Type "export" to download CSV\n`;
-                previewMessage += `➕ Send more contacts to add them`;
-                
-                twiml.message(previewMessage);
             }
             
         } else {

@@ -25,6 +25,7 @@ class Store {
         }
         // Disable Redis on connection failure to prevent hanging operations
         this.redis = null;
+        this.disabled = true; // Flag to prevent reconnection attempts
         console.log('🔄 SESSION-STORE: Falling back to memory storage due to Redis error');
       });
       
@@ -33,6 +34,7 @@ class Store {
       } catch (connectError) {
         console.error('Redis connection failed, falling back to memory:', connectError);
         this.redis = null;
+        this.disabled = true;
       }
     }
   }
@@ -48,7 +50,7 @@ class Store {
 
   async get(key) {
     console.log(`🔄 SESSION-STORE: get called for key ${key}`);
-    if (this.redis) {
+    if (this.redis && !this.disabled) {
       const raw = await this.redis.get(key);
       const result = raw ? JSON.parse(raw) : null;
       console.log(`🔄 SESSION-STORE: Redis get result: ${result ? (Array.isArray(result) ? result.length + ' items' : typeof result) : 'null'}`);
