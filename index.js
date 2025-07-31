@@ -564,6 +564,9 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
         throw new Error('Plain text template SID not configured');
     }
     
+    // Initialize Twilio client
+    const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+    
     // Build contact preview (up to 3 contacts)
     let contactPreview = '';
     contacts.slice(0, 3).forEach((contact, index) => {
