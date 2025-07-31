@@ -8,6 +8,7 @@ require('dotenv').config();
 const { parseVCF } = require('./src/vcf-parser');
 const { generateCSV } = require('./src/csv-generator');
 const { parseContactFile, getSupportedFormats } = require('./src/csv-excel-parser');
+const store = require('./src/session-store');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -706,20 +707,23 @@ app.post('/webhook', async (req, res) => {
             Body === '1️⃣' || Body === '1') {
             
             console.log(`📤 Export triggered via: ${ButtonText || ButtonPayload || Body}`);
-            const batch = await storage.get(`batch:${From}`);
             
-            if (!batch || batch.contacts.length === 0) {
+            // Use session store to get and clear contacts
+            const cleanPhone = From.replace('whatsapp:', '');
+            const contacts = await store.popContacts(cleanPhone);
+            
+            if (!contacts || contacts.length === 0) {
                 twiml.message(`❌ No contacts to export.\n\nSend some contact files first!`);
                 res.type('text/xml');
                 res.send(twiml.toString());
                 return;
             }
             
-            console.log(`📊 Generating CSV for ${batch.contacts.length} contacts...`);
+            console.log(`📊 Generating CSV for ${contacts.length} contacts...`);
             
-            // Generate CSV from batch
+            // Generate CSV from contacts
             const csvStartTime = Date.now();
-            const csv = generateCSV(batch.contacts);
+            const csv = generateCSV(contacts);
             const csvTime = Date.now() - csvStartTime;
             
             console.log(`📝 CSV generated in ${csvTime}ms (${(csv.length / 1024).toFixed(2)}KB)`);
@@ -733,17 +737,17 @@ app.post('/webhook', async (req, res) => {
                 filename: `contacts_${Date.now()}.csv`,
                 from: From,
                 created: Date.now(),
-                contactCount: batch.contacts.length
+                contactCount: contacts.length
             });
             
             // Send Download Template with CSV Button
             try {
-                await sendDownloadTemplateMessage(From, batch.contacts.length, fileId);
+                await sendDownloadTemplateMessage(From, contacts.length, fileId);
             } catch (downloadError) {
                 console.error('❌ Download template failed, using TwiML fallback:', downloadError);
                 
                 const downloadUrl = `${BASE_URL}/get/${fileId}`;
-                twiml.message(`✅ **Your CSV file with ${batch.contacts.length} contacts is ready!**
+                twiml.message(`✅ **Your CSV file with ${contacts.length} contacts is ready!**
 
 📎 *Download CSV*
 ${downloadUrl}
@@ -752,8 +756,7 @@ ${downloadUrl}
 💡 _Tap the link above to download your file_`);
             }
             
-            // Clear batch after export
-            await storage.del(`batch:${From}`);
+            // Batch is already cleared by popContacts()
             
         } else if (NumMedia > 0) {
             // AUTO-BATCH CONTACT PROCESSING
@@ -1005,32 +1008,12 @@ _Dual template system ready!_`);
                 if (extractedContacts.length > 0) {
                     console.log(`📝 Contacts found, processing batch for ${From}`);
                     
-                    // Get existing batch or create new one
-                    let batch = await storage.get(`batch:${From}`) || { 
-                        contacts: [], 
-                        count: 0, 
-                        filesProcessed: 0,
-                        textMessages: 0 
-                    };
+                    // Use session store to append contacts (handles batching automatically)
+                    const cleanPhone = From.replace('whatsapp:', '');
+                    console.log(`📝 Adding ${extractedContacts.length} contacts to batch for ${cleanPhone}`);
                     
-                    console.log(`📝 Retrieved batch with ${batch.contacts.length} existing contacts`);
-                    
-                    // Add extracted contacts to batch
-                    batch.contacts.push(...extractedContacts);
-                    batch.count = batch.contacts.length;
-                    batch.textMessages = (batch.textMessages || 0) + 1;
-                    batch.lastUpdated = Date.now();
-                    
-                    console.log(`📝 Updated batch: ${batch.count} total contacts, ${batch.textMessages} text messages`);
-                    
-                    // Save batch with extended timeout for text interaction
-                    console.log(`📝 Saving batch to storage...`);
-                    await storage.set(`batch:${From}`, batch, BATCH_TIMEOUT);
-                    console.log(`📝 Batch saved successfully`);
-                    
-                    // Verify batch was saved
-                    const verifyBatch = await storage.get(`batch:${From}`);
-                    console.log(`📝 Verification: ${verifyBatch ? verifyBatch.count : 'null'} contacts in saved batch`);
+                    const totalCount = await store.appendContacts(cleanPhone, extractedContacts);
+                    console.log(`📝 Batch now contains ${totalCount} total contacts`);
                     
                     // Send interactive preview message
                     let previewMessage = `📝 **Found ${extractedContacts.length} contact(s) in your message!**\n\n`;
@@ -1047,7 +1030,7 @@ _Dual template system ready!_`);
                         previewMessage += `... and ${extractedContacts.length - 3} more\n\n`;
                     }
                     
-                    previewMessage += `💾 **Total in batch: ${batch.count} contacts**\n\n`;
+                    previewMessage += `💾 **Total in batch: ${totalCount} contacts**\n\n`;
                     previewMessage += `**Options:**\n`;
                     previewMessage += `📤 Type "export" to download CSV\n`;
                     previewMessage += `➕ Send more contacts to add them\n`;
@@ -1071,16 +1054,17 @@ _Dual template system ready!_`);
             }
             
         } else if (Body && Body.toLowerCase() === 'preview') {
-            // PREVIEW BATCH CONTENTS
-            const batch = await storage.get(`batch:${From}`);
+            // PREVIEW BATCH CONTENTS using session store
+            const cleanPhone = From.replace('whatsapp:', '');
+            const contacts = await store.get(`contacts:${cleanPhone}`) || [];
             
-            if (!batch || batch.contacts.length === 0) {
+            if (contacts.length === 0) {
                 twiml.message(`📝 **No contacts in your batch yet.**\n\nSend contact files or plain text messages with contact details to get started!`);
             } else {
-                let previewMessage = `📋 **Batch Preview (${batch.contacts.length} contacts):**\n\n`;
+                let previewMessage = `📋 **Batch Preview (${contacts.length} contacts):**\n\n`;
                 
                 // Show all contacts (limit to 20 for WhatsApp message limits)
-                const contactsToShow = batch.contacts.slice(0, 20);
+                const contactsToShow = contacts.slice(0, 20);
                 contactsToShow.forEach((contact, index) => {
                     previewMessage += `${index + 1}. **${contact.name || 'Contact'}**\n`;
                     if (contact.mobile) previewMessage += `   📱 ${contact.mobile}\n`;
@@ -1088,8 +1072,8 @@ _Dual template system ready!_`);
                     previewMessage += `\n`;
                 });
                 
-                if (batch.contacts.length > 20) {
-                    previewMessage += `... and ${batch.contacts.length - 20} more contacts\n\n`;
+                if (contacts.length > 20) {
+                    previewMessage += `... and ${contacts.length - 20} more contacts\n\n`;
                 }
                 
                 previewMessage += `📤 Type "export" to download CSV\n`;
