@@ -1522,6 +1522,59 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
+// Debug endpoints for troubleshooting
+app.get('/test-store', async (req, res) => {
+    const testPhone = '1234567890';
+    const testContacts = [
+        { name: 'Test User', mobile: '+1234567890', email: 'test@example.com' }
+    ];
+    
+    try {
+        console.log('🧪 TEST-STORE: Starting store test');
+        
+        // Test store operations
+        const count = await store.appendContacts(testPhone, testContacts);
+        console.log('🧪 TEST-STORE: Append result:', count);
+        
+        const retrieved = await store.get(`contacts:${testPhone}`);
+        console.log('🧪 TEST-STORE: Retrieved:', retrieved?.length || 0);
+        
+        const popped = await store.popContacts(testPhone);
+        console.log('🧪 TEST-STORE: Popped:', popped?.length || 0);
+        
+        res.json({
+            success: true,
+            appendResult: count,
+            retrievedCount: retrieved?.length || 0,
+            poppedCount: popped?.length || 0,
+            storageType: store.redis ? 'Redis' : 'Memory',
+            redisConnected: !!store.redis
+        });
+    } catch (error) {
+        console.log('🧪 TEST-STORE: Error:', error);
+        res.json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Debug endpoint to show current storage state
+app.get('/debug-storage/:phone', async (req, res) => {
+    const phone = req.params.phone.replace('whatsapp:', '');
+    try {
+        const contacts = await store.get(`contacts:${phone}`);
+        res.json({
+            phone: phone,
+            contactCount: contacts?.length || 0,
+            contacts: contacts || [],
+            storageType: store.redis ? 'Redis' : 'Memory'
+        });
+    } catch (error) {
+        res.json({ error: error.message });
+    }
+});
+
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
     console.error('💥 Uncaught Exception:', error);
