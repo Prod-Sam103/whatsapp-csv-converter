@@ -17,7 +17,13 @@ class Store {
         url,
         socket: { connectTimeout: 15000 }   // 15 000 ms instead of 5 000
       });
-      this.redis.on('error', console.error);
+      this.redis.on('error', (error) => {
+        if (process.env.NODE_ENV !== 'production') {
+          console.error('Redis error:', error);
+        } else {
+          console.error('Redis connection error occurred');
+        }
+      });
       this.redis.connect();
     }
   }

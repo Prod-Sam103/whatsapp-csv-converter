@@ -1,6 +1,6 @@
 // test-parser.js - Weapons Testing Range
-const { parseVCF } = require('./vcf-parser');
-const { generateCSV } = require('./csv-generator');
+const { parseVCF } = require('../src/vcf-parser');
+const { generateCSV } = require('../src/csv-generator');
 const fs = require('fs');
 
 console.log('🎯 WEAPONS TEST RANGE - OPERATIONAL\n');

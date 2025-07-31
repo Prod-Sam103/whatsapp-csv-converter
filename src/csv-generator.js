@@ -1,4 +1,12 @@
 // csv-generator.js - Data Transformation Unit
+
+// Production-aware logging
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const log = (...args) => {
+    if (!IS_PRODUCTION) {
+        log(...args);
+    }
+};
 function generateCSV(contacts) {
     // Prepare CSV headers - Operation parameters
     const headers = ['name', 'mobile', 'email', 'passes'];
@@ -16,7 +24,7 @@ function generateCSV(contacts) {
     });
     
     const csvContent = csvRows.join('\n');
-    console.log(`📊 Generated CSV with ${contacts.length} entries`);
+    log(`📊 Generated CSV with ${contacts.length} entries`);
     
     return csvContent;
 }

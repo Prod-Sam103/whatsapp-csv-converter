@@ -13,6 +13,58 @@ const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json({ limit: '50mb' })); // Increased payload limit
 
+// SECURITY: Rate limiting protection
+const rateLimitStore = new Map();
+function rateLimit(req, res, next) {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0] || 
+               req.connection.remoteAddress || 
+               req.socket.remoteAddress || 
+               'unknown';
+    
+    const now = Date.now();
+    const windowMs = 15 * 60 * 1000; // 15 minutes
+    const maxRequests = 100; // 100 requests per window
+    
+    // Clean old entries
+    for (const [key, data] of rateLimitStore.entries()) {
+        if (now - data.resetTime > windowMs) {
+            rateLimitStore.delete(key);
+        }
+    }
+    
+    const key = `${ip}:${req.path}`;
+    const current = rateLimitStore.get(key) || { count: 0, resetTime: now };
+    
+    if (now - current.resetTime > windowMs) {
+        current.count = 0;
+        current.resetTime = now;
+    }
+    
+    current.count++;
+    rateLimitStore.set(key, current);
+    
+    if (current.count > maxRequests) {
+        console.log(`🚨 Rate limit exceeded for ${ip}: ${current.count} requests`);
+        return res.status(429).json({
+            error: 'Too Many Requests',
+            message: 'Rate limit exceeded. Please try again later.',
+            resetTime: current.resetTime + windowMs
+        });
+    }
+    
+    // Add rate limit headers
+    res.set({
+        'X-RateLimit-Limit': maxRequests,
+        'X-RateLimit-Remaining': Math.max(0, maxRequests - current.count),
+        'X-RateLimit-Reset': new Date(current.resetTime + windowMs).toISOString()
+    });
+    
+    next();
+}
+
+// Apply rate limiting to all routes
+app.use(rateLimit);
+
 // PRODUCTION CONFIGURATION
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
@@ -182,11 +234,127 @@ function isAuthorizedNumber(phoneNumber) {
     return AUTHORIZED_NUMBERS.includes(cleanNumber);
 }
 
+// SECURITY: Input validation and sanitization function
+function validateAndSanitizeTextInput(input) {
+    if (!input || typeof input !== 'string') {
+        return null;
+    }
+    
+    // Length limits to prevent DoS
+    const MAX_TEXT_LENGTH = 10000; // 10KB max text message
+    if (input.length > MAX_TEXT_LENGTH) {
+        console.log(`🚨 Text input too long: ${input.length} chars (max: ${MAX_TEXT_LENGTH})`);
+        return null;
+    }
+    
+    // Remove potential XSS and injection attempts
+    let sanitized = input
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Remove <script> tags
+        .replace(/<[^>]*>/g, '') // Remove HTML tags
+        .replace(/javascript:/gi, '') // Remove javascript: protocol
+        .replace(/data:/gi, '') // Remove data: protocol
+        .replace(/vbscript:/gi, '') // Remove vbscript: protocol
+        .trim();
+    
+    // Basic length check after sanitization
+    if (sanitized.length < 3) {
+        return null;
+    }
+    
+    // Check for suspicious patterns that might indicate injection attempts
+    const suspiciousPatterns = [
+        /\$\{.*\}/, // Template literal injection
+        /<%.*%>/, // Template injection
+        /\{\{.*\}\}/, // Template injection
+        /eval\s*\(/, // Code execution
+        /function\s*\(/, // Function definition
+        /setTimeout|setInterval/i, // Timer functions
+        /document\.|window\./i, // DOM access
+        /XMLHttpRequest|fetch\(/i, // Network requests
+    ];
+    
+    for (const pattern of suspiciousPatterns) {
+        if (pattern.test(sanitized)) {
+            console.log(`🚨 Suspicious pattern detected in input: ${pattern}`);
+            return null;
+        }
+    }
+    
+    return sanitized;
+}
+
+// SECURITY: Media URL validation to prevent SSRF attacks
+function validateMediaUrl(url) {
+    if (!url || typeof url !== 'string') {
+        return false;
+    }
+    
+    try {
+        const parsedUrl = new URL(url);
+        
+        // Only allow HTTPS URLs from Twilio
+        if (parsedUrl.protocol !== 'https:') {
+            console.log(`🚨 Invalid protocol in media URL: ${parsedUrl.protocol}`);
+            return false;
+        }
+        
+        // Only allow Twilio media domains
+        const allowedDomains = [
+            'api.twilio.com',
+            'media.twiliocdn.com',
+            /^[a-z0-9-]+\.twilio\.com$/,
+            /^[a-z0-9-]+\.twiliocdn\.com$/
+        ];
+        
+        const hostname = parsedUrl.hostname.toLowerCase();
+        const isAllowed = allowedDomains.some(domain => {
+            if (typeof domain === 'string') {
+                return hostname === domain;
+            } else {
+                return domain.test(hostname);
+            }
+        });
+        
+        if (!isAllowed) {
+            console.log(`🚨 Unauthorized domain in media URL: ${hostname}`);
+            return false;
+        }
+        
+        // Prevent accessing internal network addresses
+        const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+        if (ipRegex.test(hostname)) {
+            const parts = hostname.split('.').map(Number);
+            // Block private IP ranges
+            if (
+                parts[0] === 10 || // 10.0.0.0/8
+                (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || // 172.16.0.0/12
+                (parts[0] === 192 && parts[1] === 168) || // 192.168.0.0/16
+                parts[0] === 127 || // 127.0.0.0/8 (localhost)
+                parts[0] === 0     // 0.0.0.0/8
+            ) {
+                console.log(`🚨 Private IP address blocked: ${hostname}`);
+                return false;
+            }
+        }
+        
+        return true;
+        
+    } catch (error) {
+        console.log(`🚨 Invalid URL format: ${error.message}`);
+        return false;
+    }
+}
+
 // High-performance contact parsing with streaming
 async function parseContactMediaScalable(mediaUrl, req) {
     try {
         const accountSid = process.env.TWILIO_ACCOUNT_SID;
         const authToken = process.env.TWILIO_AUTH_TOKEN;
+        
+        // SECURITY: Validate media URL to prevent SSRF attacks
+        if (!validateMediaUrl(mediaUrl)) {
+            throw new Error('Invalid or unsafe media URL provided');
+        }
         
         console.log(`📥 Downloading media from: ${mediaUrl}`);
         
@@ -730,7 +898,7 @@ ${downloadUrl}
             twiml.message(`🎖️ **WhatsApp CSV Converter**
 
 📋 **HOW TO USE:**
-1. Send your contact files
+1. Send your contact files OR plain text
 2. Keep sending more if needed
 3. Tap "Export" button when done
 
@@ -739,13 +907,14 @@ ${downloadUrl}
    📊 CSV
    📗 Excel
    📄 PDF
-   📝 Text
+   📝 Plain Text Messages
    📘 DOCX
 
 ⚡ **FEATURES:**
 ✅ Auto-batching system
 ✅ Up to 250 contacts per batch
 ✅ Interactive Export & Download buttons
+✅ Plain text contact extraction
 ✅ Works with iPhone & Android
 
 💡 **TIPS:**
@@ -753,6 +922,16 @@ ${downloadUrl}
 • WhatsApp sends 10 files max per message
 • Just keep sending - system auto-batches
 • Tap "Export" button to download CSV
+
+📝 **Plain Text Examples:**
+• John Doe +2348123456789 john@example.com
+• Jane Smith: 08012345678
+• Bob Wilson - +44 20 7946 0958 bob@company.com
+
+🔍 **Commands:**
+• "export" - Download CSV file
+• "preview" - See all contacts in batch
+• "help" - Show this message
 
 _Ready for your contacts!_`);
             
@@ -799,6 +978,107 @@ _Dual template system ready!_`);
                 twiml.message(`❌ Template test failed: ${error.message}`);
             }
             
+        } else if (Body && Body.trim() && NumMedia === 0) {
+            // PLAIN TEXT CONTACT EXTRACTION
+            // SECURITY: Validate and sanitize input
+            const sanitizedBody = validateAndSanitizeTextInput(Body);
+            if (!sanitizedBody) {
+                twiml.message(`❌ **Invalid input detected.**\n\nPlease send valid contact information or files.`);
+                res.type('text/xml');
+                res.send(twiml.toString());
+                return;
+            }
+            
+            console.log(`📝 Plain text message received (${sanitizedBody.length} chars)`);
+            
+            try {
+                // Use enhanced text parser to extract contacts from message
+                const { parseContactFile } = require('./src/csv-excel-parser');
+                const extractedContacts = await parseContactFile(sanitizedBody, 'text/plain');
+                
+                console.log(`📝 Extracted ${extractedContacts.length} contacts from plain text`);
+                
+                if (extractedContacts.length > 0) {
+                    // Get existing batch or create new one
+                    let batch = await storage.get(`batch:${From}`) || { 
+                        contacts: [], 
+                        count: 0, 
+                        filesProcessed: 0,
+                        textMessages: 0 
+                    };
+                    
+                    // Add extracted contacts to batch
+                    batch.contacts.push(...extractedContacts);
+                    batch.count = batch.contacts.length;
+                    batch.textMessages = (batch.textMessages || 0) + 1;
+                    batch.lastUpdated = Date.now();
+                    
+                    // Save batch with extended timeout for text interaction
+                    await storage.set(`batch:${From}`, batch, BATCH_TIMEOUT);
+                    
+                    // Send interactive preview message
+                    let previewMessage = `📝 **Found ${extractedContacts.length} contact(s) in your message!**\n\n`;
+                    
+                    // Show up to 3 contacts in preview
+                    extractedContacts.slice(0, 3).forEach((contact, index) => {
+                        previewMessage += `${index + 1}. **${contact.name || 'Contact'}**\n`;
+                        if (contact.mobile) previewMessage += `   📱 ${contact.mobile}\n`;
+                        if (contact.email) previewMessage += `   📧 ${contact.email}\n`;
+                        previewMessage += `\n`;
+                    });
+                    
+                    if (extractedContacts.length > 3) {
+                        previewMessage += `... and ${extractedContacts.length - 3} more\n\n`;
+                    }
+                    
+                    previewMessage += `💾 **Total in batch: ${batch.count} contacts**\n\n`;
+                    previewMessage += `**Options:**\n`;
+                    previewMessage += `📤 Type "export" to download CSV\n`;
+                    previewMessage += `➕ Send more contacts to add them\n`;
+                    previewMessage += `👁️ Type "preview" to see all contacts`;
+                    
+                    twiml.message(previewMessage);
+                    
+                } else {
+                    // No contacts found, but be helpful
+                    twiml.message(`📝 **No contacts detected in your message.**\n\n**Examples of supported formats:**\n• John Doe +2348123456789 john@example.com\n• Jane Smith: 08012345678\n• Bob Wilson - +44 20 7946 0958 bob@company.com\n\n**Or send contact files directly!**\n\nType "help" for more info.`);
+                }
+                
+            } catch (textError) {
+                console.error('📝 Plain text parsing failed:', textError);
+                
+                // Fallback to welcome message
+                twiml.message(`👋 **Welcome to Contact Converter!**\n\nSend your contact files or plain text with contact details!\n\n📱 Works with: iPhone contacts, Android contacts, Excel files\n⚡ Enhanced text parsing for event planners\n\n💡 Just send your contacts and tap "Export" when done!\n\nType "help" for more info.`);
+            }
+            
+        } else if (Body && Body.toLowerCase() === 'preview') {
+            // PREVIEW BATCH CONTENTS
+            const batch = await storage.get(`batch:${From}`);
+            
+            if (!batch || batch.contacts.length === 0) {
+                twiml.message(`📝 **No contacts in your batch yet.**\n\nSend contact files or plain text messages with contact details to get started!`);
+            } else {
+                let previewMessage = `📋 **Batch Preview (${batch.contacts.length} contacts):**\n\n`;
+                
+                // Show all contacts (limit to 20 for WhatsApp message limits)
+                const contactsToShow = batch.contacts.slice(0, 20);
+                contactsToShow.forEach((contact, index) => {
+                    previewMessage += `${index + 1}. **${contact.name || 'Contact'}**\n`;
+                    if (contact.mobile) previewMessage += `   📱 ${contact.mobile}\n`;
+                    if (contact.email) previewMessage += `   📧 ${contact.email}\n`;
+                    previewMessage += `\n`;
+                });
+                
+                if (batch.contacts.length > 20) {
+                    previewMessage += `... and ${batch.contacts.length - 20} more contacts\n\n`;
+                }
+                
+                previewMessage += `📤 Type "export" to download CSV\n`;
+                previewMessage += `➕ Send more contacts to add them`;
+                
+                twiml.message(previewMessage);
+            }
+            
         } else {
             // Welcome message
             twiml.message(`👋 **Welcome to Contact Converter!**
@@ -807,6 +1087,7 @@ Send your contact files for instant CSV conversion!
 
 📱 Works with: iPhone contacts, Android contacts, Excel files
 ⚡ Dual template system with Export & Download buttons
+📝 Enhanced text parsing for plain text contacts
 
 💡 Just send your contacts and tap "Export" when done!
 
@@ -816,22 +1097,55 @@ Type "help" for more info.`);
     } catch (error) {
         console.error('❌ Operation failed:', error);
         
+        // SECURITY: Don't expose sensitive error details to users
+        const safeErrorMessage = IS_PRODUCTION 
+            ? 'Processing failed. Please try again or contact support.'
+            : `Processing failed: ${error.message}`;
+        
         twiml.message(`❌ **System Error**
 
-Processing failed: ${error.message}
+${safeErrorMessage}
 
 Please try again or contact support.
 
-**Debug info:** ${error.stack?.split('\n')[0] || 'Unknown error'}`);
+Type "help" for assistance.`);
     }
     
     res.type('text/xml');
     res.send(twiml.toString());
 });
 
+// SECURITY: File ID validation to prevent path traversal
+function validateFileId(fileId) {
+    if (!fileId || typeof fileId !== 'string') {
+        return false;
+    }
+    
+    // Must be a valid UUID format (36 characters with dashes)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(fileId)) {
+        console.log(`🚨 Invalid file ID format: ${fileId}`);
+        return false;
+    }
+    
+    // Additional safety checks
+    if (fileId.includes('..') || fileId.includes('/') || fileId.includes('\\')) {
+        console.log(`🚨 Path traversal attempt detected: ${fileId}`);
+        return false;
+    }
+    
+    return true;
+}
+
 // WhatsApp-safe redirect endpoint
 app.get('/get/:fileId', async (req, res) => {
     const { fileId } = req.params;
+    
+    // SECURITY: Validate file ID
+    if (!validateFileId(fileId)) {
+        return res.status(400).send('Invalid file ID');
+    }
+    
     console.log(`🔗 WhatsApp redirect request for file: ${fileId}`);
     res.redirect(301, `/download/${fileId}`);
 });
@@ -839,6 +1153,27 @@ app.get('/get/:fileId', async (req, res) => {
 // High-performance download endpoint with streaming
 app.get('/download/:fileId', async (req, res) => {
     const { fileId } = req.params;
+    
+    // SECURITY: Validate file ID
+    if (!validateFileId(fileId)) {
+        return res.status(400).send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Invalid Request</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>
+                    body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+                    h1 { color: #e74c3c; }
+                </style>
+            </head>
+            <body>
+                <h1>❌ Invalid File ID</h1>
+                <p>The file ID provided is not valid.</p>
+            </body>
+            </html>
+        `);
+    }
     
     try {
         console.log(`📥 Download request for file: ${fileId}`);

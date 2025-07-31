@@ -1,11 +1,27 @@
 // src/csv-excel-parser.js - Universal Contact File Parser V2
 // Enhanced with multi-format support and improved text parsing
 
+// Production-aware logging
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const log = (...args) => {
+    if (!IS_PRODUCTION) {
+        log(...args);
+    }
+};
+const logError = (...args) => {
+    if (!IS_PRODUCTION) {
+        logError(...args);
+    } else {
+        // Only log sanitized error messages in production
+        logError('Parser error occurred');
+    }
+};
+
 // Main parsing function - routes to appropriate parser based on content type
 async function parseContactFile(fileContent, mediaType = '') {
     try {
-        console.log(`🔍 Processing file type: ${mediaType}`);
-        console.log(`📏 File size: ${Buffer.isBuffer(fileContent) ? fileContent.length : fileContent.length} bytes`);
+        log(`🔍 Processing file type: ${mediaType}`);
+        log(`📏 File size: ${Buffer.isBuffer(fileContent) ? fileContent.length : fileContent.length} bytes`);
         
         // Convert buffer to string for text-based formats
         let content = fileContent;
@@ -16,7 +32,7 @@ async function parseContactFile(fileContent, mediaType = '') {
         // VCF files - highest priority detection
         if (mediaType.includes('vcard') || mediaType.includes('text/x-vcard') || 
             content.includes('BEGIN:VCARD')) {
-            console.log('📇 Parsing as VCF format');
+            log('📇 Parsing as VCF format');
             const { parseVCF } = require('./vcf-parser');
             return parseVCF(content);
         }
@@ -25,60 +41,60 @@ async function parseContactFile(fileContent, mediaType = '') {
         if (mediaType.includes('csv') || mediaType.includes('application/csv') ||
             (content.includes(',') && (content.toLowerCase().includes('name') || 
              content.toLowerCase().includes('phone') || content.toLowerCase().includes('email')))) {
-            console.log('📊 Parsing as CSV format');
+            log('📊 Parsing as CSV format');
             return parseCSV(content);
         }
         
         // Excel files
         if (mediaType.includes('excel') || mediaType.includes('spreadsheet') || 
             mediaType.includes('vnd.ms-excel') || mediaType.includes('officedocument.spreadsheetml')) {
-            console.log('📗 Parsing as Excel format');
+            log('📗 Parsing as Excel format');
             return parseExcel(fileContent); // Pass original buffer for Excel
         }
         
         // PDF files
         if (mediaType.includes('pdf')) {
-            console.log('📄 Parsing as PDF format');
+            log('📄 Parsing as PDF format');
             return await parsePDF(fileContent); // Pass original buffer for PDF
         }
         
         // Text files - ENHANCED VERSION
         if (mediaType.includes('text/plain') || mediaType.includes('text/') || 
             (!mediaType && typeof content === 'string')) {
-            console.log('📝 Parsing as Text format');
+            log('📝 Parsing as Text format');
             return parseTextContacts(content);
         }
         
         // Auto-detection for unknown formats
-        console.log('🔄 Unknown format, attempting intelligent detection...');
+        log('🔄 Unknown format, attempting intelligent detection...');
         
         // Check for VCF patterns
         if (content.includes('BEGIN:VCARD') || content.includes('VCARD')) {
-            console.log('🔍 Auto-detected VCF content');
+            log('🔍 Auto-detected VCF content');
             const { parseVCF } = require('./vcf-parser');
             return parseVCF(content);
         }
         
         // Check for CSV patterns
         if (content.includes(',') && (content.includes('@') || content.match(/\d{3,}/))) {
-            console.log('🔍 Auto-detected CSV content');
+            log('🔍 Auto-detected CSV content');
             return parseCSV(content);
         }
         
         // Fallback to text parsing for everything else
-        console.log('🔍 Fallback to enhanced text parsing');
+        log('🔍 Fallback to enhanced text parsing');
         return parseTextContacts(content);
         
     } catch (error) {
-        console.error('❌ Parse error:', error);
+        logError('❌ Parse error:', error);
         
         // Final fallback to text parsing
         try {
             const textContent = Buffer.isBuffer(fileContent) ? fileContent.toString('utf8') : fileContent;
-            console.log('🆘 Emergency text parsing fallback...');
+            log('🆘 Emergency text parsing fallback...');
             return parseTextContacts(textContent);
         } catch (finalError) {
-            console.error('💥 All parsing methods failed:', finalError);
+            logError('💥 All parsing methods failed:', finalError);
             return [];
         }
     }
@@ -89,14 +105,14 @@ function parseTextContacts(textContent) {
     const contacts = [];
     
     try {
-        console.log('📝 Starting enhanced text parsing...');
+        log('📝 Starting enhanced text parsing...');
         
         if (!textContent || typeof textContent !== 'string') {
-            console.log('📝 Invalid text content');
+            log('📝 Invalid text content');
             return contacts;
         }
         
-        console.log(`📝 Text length: ${textContent.length} characters`);
+        log(`📝 Text length: ${textContent.length} characters`);
         
         // Enhanced regex patterns
         const emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/gi;
@@ -104,7 +120,7 @@ function parseTextContacts(textContent) {
         const namePattern = /^[A-Z][a-zA-Z\s]{2,40}$/gm;
         
         // Method 1: Look for structured contact blocks
-        console.log('📝 Method 1: Searching for structured contact blocks...');
+        log('📝 Method 1: Searching for structured contact blocks...');
         const contactBlockPattern = /(?:name|contact)[\s:]*([^\n\r]+)[\s\S]*?(?:phone|mobile|tel)[\s:]*([^\n\r]+)[\s\S]*?(?:email|mail)[\s:]*([^\n\r]+)/gi;
         
         let match;
@@ -122,13 +138,13 @@ function parseTextContacts(textContent) {
                 blockCount++;
             }
         }
-        console.log(`📝 Method 1 found: ${contacts.length} contacts`);
+        log(`📝 Method 1 found: ${contacts.length} contacts`);
         
         // Method 2: Line-by-line analysis if no blocks found
         if (contacts.length === 0) {
-            console.log('📝 Method 2: Line-by-line analysis...');
+            log('📝 Method 2: Line-by-line analysis...');
             const lines = textContent.split(/[\n\r]+/).filter(line => line.trim().length > 3);
-            console.log(`📝 Analyzing ${lines.length} lines`);
+            log(`📝 Analyzing ${lines.length} lines`);
             
             for (const line of lines) {
                 const emailMatch = line.match(emailPattern);
@@ -167,17 +183,17 @@ function parseTextContacts(textContent) {
                     }
                 }
             }
-            console.log(`📝 Method 2 found: ${contacts.length} contacts`);
+            log(`📝 Method 2 found: ${contacts.length} contacts`);
         }
         
         // Method 3: Extract all patterns and try to match them intelligently
         if (contacts.length === 0) {
-            console.log('📝 Method 3: Pattern extraction and matching...');
+            log('📝 Method 3: Pattern extraction and matching...');
             const emails = [...textContent.matchAll(emailPattern)].map(m => m[0]);
             const phones = [...textContent.matchAll(phonePattern)].map(m => m[0]);
             const names = [...textContent.matchAll(namePattern)].map(m => m[0]);
             
-            console.log(`📝 Found patterns: ${emails.length} emails, ${phones.length} phones, ${names.length} names`);
+            log(`📝 Found patterns: ${emails.length} emails, ${phones.length} phones, ${names.length} names`);
             
             const cleanPhones = phones.map(phone => cleanPhoneNumber(phone)).filter(p => p);
             const maxItems = Math.max(emails.length, cleanPhones.length, names.length);
@@ -194,12 +210,12 @@ function parseTextContacts(textContent) {
                     contacts.push(contact);
                 }
             }
-            console.log(`📝 Method 3 found: ${contacts.length} contacts`);
+            log(`📝 Method 3 found: ${contacts.length} contacts`);
         }
         
         // Method 4: Advanced pattern recognition for unstructured text
         if (contacts.length === 0) {
-            console.log('📝 Method 4: Advanced pattern recognition...');
+            log('📝 Method 4: Advanced pattern recognition...');
             
             // Look for common contact formats
             const advancedPatterns = [
@@ -227,7 +243,7 @@ function parseTextContacts(textContent) {
                     }
                 }
             }
-            console.log(`📝 Method 4 found: ${contacts.length} contacts`);
+            log(`📝 Method 4 found: ${contacts.length} contacts`);
         }
         
         // Remove duplicates based on phone or email
@@ -242,11 +258,11 @@ function parseTextContacts(textContent) {
             }
         }
         
-        console.log(`📝 Text parsing complete: ${unique.length} unique contacts extracted`);
+        log(`📝 Text parsing complete: ${unique.length} unique contacts extracted`);
         return unique;
         
     } catch (error) {
-        console.error('📝 Text parsing failed:', error);
+        logError('📝 Text parsing failed:', error);
         return [];
     }
 }
@@ -290,17 +306,17 @@ function parseCSV(csvContent) {
     const contacts = [];
     
     try {
-        console.log('📊 Starting CSV parsing...');
+        log('📊 Starting CSV parsing...');
         const lines = csvContent.split('\n').filter(line => line.trim());
         
         if (lines.length < 2) {
-            console.log('📊 CSV too short, no data rows found');
+            log('📊 CSV too short, no data rows found');
             return contacts;
         }
         
         // Parse headers intelligently
         const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase().replace(/"/g, ''));
-        console.log('📊 CSV headers detected:', headers);
+        log('📊 CSV headers detected:', headers);
         
         // Find column indices intelligently
         const nameIndex = headers.findIndex(h => 
@@ -313,7 +329,7 @@ function parseCSV(csvContent) {
             h.includes('email') || h.includes('mail') || h.includes('@')
         );
         
-        console.log(`📊 Column mapping: name=${nameIndex}, phone=${phoneIndex}, email=${emailIndex}`);
+        log(`📊 Column mapping: name=${nameIndex}, phone=${phoneIndex}, email=${emailIndex}`);
         
         // Parse data rows
         for (let i = 1; i < lines.length; i++) {
@@ -332,16 +348,16 @@ function parseCSV(csvContent) {
                     contacts.push(contact);
                 }
             } catch (rowError) {
-                console.error(`📊 Error parsing CSV row ${i}:`, rowError);
+                logError(`📊 Error parsing CSV row ${i}:`, rowError);
                 continue;
             }
         }
         
-        console.log(`📊 CSV parsed successfully: ${contacts.length} contacts extracted`);
+        log(`📊 CSV parsed successfully: ${contacts.length} contacts extracted`);
         return contacts;
         
     } catch (error) {
-        console.error('📊 CSV parsing failed:', error);
+        logError('📊 CSV parsing failed:', error);
         return [];
     }
 }
@@ -383,29 +399,75 @@ function parseCSVLine(line) {
 // Excel parsing function (requires xlsx package)
 function parseExcel(excelBuffer) {
     try {
-        console.log('📗 Starting Excel parsing...');
+        log('📗 Starting Excel parsing...');
+        
+        // SECURITY: Input validation and size limits
+        if (!Buffer.isBuffer(excelBuffer)) {
+            throw new Error('Invalid Excel buffer provided');
+        }
+        
+        const bufferSize = excelBuffer.length;
+        const MAX_EXCEL_SIZE = 20 * 1024 * 1024; // 20MB limit
+        
+        if (bufferSize > MAX_EXCEL_SIZE) {
+            throw new Error(`Excel file too large: ${Math.round(bufferSize / 1024 / 1024)}MB (max: 20MB)`);
+        }
+        
+        log(`📗 Excel buffer size: ${Math.round(bufferSize / 1024)}KB`);
+        
         const XLSX = require('xlsx');
         
-        // Read the Excel file
-        const workbook = XLSX.read(excelBuffer, { type: 'buffer' });
+        // SECURITY: Safe reading with limited options to prevent prototype pollution
+        const workbook = XLSX.read(excelBuffer, { 
+            type: 'buffer',
+            cellText: false,      // Disable cell text processing to reduce attack surface
+            cellFormula: false,   // Disable formula processing for security
+            cellHTML: false,      // Disable HTML processing
+            sheetRows: 1000,      // Limit rows to prevent DoS
+            bookSheets: true,     // Only process actual sheets
+            bookProps: false,     // Disable book properties to reduce attack surface
+            cellDates: false      // Disable date processing
+        });
+        
+        // SECURITY: Validate workbook structure
+        if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
+            throw new Error('Invalid or empty Excel workbook');
+        }
+        
+        // SECURITY: Limit number of sheets to process (prevent DoS)
+        const MAX_SHEETS = 5;
+        if (workbook.SheetNames.length > MAX_SHEETS) {
+            log(`📗 Limiting to first ${MAX_SHEETS} sheets (found ${workbook.SheetNames.length})`);
+            workbook.SheetNames = workbook.SheetNames.slice(0, MAX_SHEETS);
+        }
         
         // Get first worksheet
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         
-        console.log(`📗 Reading sheet: ${sheetName}`);
+        // SECURITY: Validate worksheet
+        if (!worksheet) {
+            throw new Error(`Worksheet '${sheetName}' not found or invalid`);
+        }
         
-        // Convert to JSON with headers
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        log(`📗 Reading sheet: ${sheetName}`);
+        
+        // SECURITY: Convert to JSON with safe options
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+            header: 1,
+            raw: false,           // Convert all values to strings for safety
+            defval: '',           // Default value for empty cells
+            range: undefined      // Use default range (prevents range manipulation attacks)
+        });
         
         if (jsonData.length < 2) {
-            console.log('📗 Excel sheet too short, no data rows found');
+            log('📗 Excel sheet too short, no data rows found');
             return [];
         }
         
         // Parse headers (first row)
         const headers = jsonData[0].map(h => (h || '').toString().toLowerCase().trim());
-        console.log('📗 Excel headers detected:', headers);
+        log('📗 Excel headers detected:', headers);
         
         // Find column indices
         const nameIndex = headers.findIndex(h => 
@@ -418,7 +480,7 @@ function parseExcel(excelBuffer) {
             h.includes('email') || h.includes('mail') || h.includes('@')
         );
         
-        console.log(`📗 Column mapping: name=${nameIndex}, phone=${phoneIndex}, email=${emailIndex}`);
+        log(`📗 Column mapping: name=${nameIndex}, phone=${phoneIndex}, email=${emailIndex}`);
         
         const contacts = [];
         
@@ -441,23 +503,23 @@ function parseExcel(excelBuffer) {
                     contacts.push(contact);
                 }
             } catch (rowError) {
-                console.error(`📗 Error parsing Excel row ${i}:`, rowError);
+                logError(`📗 Error parsing Excel row ${i}:`, rowError);
                 continue;
             }
         }
         
-        console.log(`📗 Excel parsed successfully: ${contacts.length} contacts extracted`);
+        log(`📗 Excel parsed successfully: ${contacts.length} contacts extracted`);
         return contacts;
         
     } catch (error) {
-        console.error('📗 Excel parsing failed:', error);
+        logError('📗 Excel parsing failed:', error);
         
         // Try to extract as CSV if Excel parsing fails
         try {
-            console.log('📗 Attempting CSV fallback...');
+            log('📗 Attempting CSV fallback...');
             return parseCSV(excelBuffer.toString());
         } catch (csvError) {
-            console.error('📗 CSV fallback also failed:', csvError);
+            logError('📗 CSV fallback also failed:', csvError);
             return [];
         }
     }
@@ -466,35 +528,35 @@ function parseExcel(excelBuffer) {
 // PDF parsing function (requires pdf-parse package)
 async function parsePDF(pdfBuffer) {
     try {
-        console.log('📄 Starting PDF parsing...');
+        log('📄 Starting PDF parsing...');
         const pdf = require('pdf-parse');
         
         // Extract text from PDF
         const data = await pdf(pdfBuffer);
         const textContent = data.text;
         
-        console.log(`📄 PDF text extracted: ${textContent.length} characters`);
+        log(`📄 PDF text extracted: ${textContent.length} characters`);
         
         if (!textContent || textContent.trim().length === 0) {
-            console.log('📄 No text content found in PDF');
+            log('📄 No text content found in PDF');
             return [];
         }
         
         // Use the enhanced text parser to extract contacts from PDF content
         const extractedContacts = parseTextContacts(textContent);
         
-        console.log(`📄 PDF parsed successfully: ${extractedContacts.length} contacts extracted`);
+        log(`📄 PDF parsed successfully: ${extractedContacts.length} contacts extracted`);
         return extractedContacts;
         
     } catch (error) {
-        console.error('📄 PDF parsing failed:', error);
+        logError('📄 PDF parsing failed:', error);
         
         // Fallback: try to parse as text if it's actually a text file
         try {
-            console.log('📄 Attempting text fallback...');
+            log('📄 Attempting text fallback...');
             return parseTextContacts(pdfBuffer.toString());
         } catch (textError) {
-            console.error('📄 Text fallback failed:', textError);
+            logError('📄 Text fallback failed:', textError);
             return [];
         }
     }
