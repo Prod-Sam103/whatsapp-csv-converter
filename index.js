@@ -560,7 +560,11 @@ async function parseContactFileScalable(fileContent, mediaType, filename) {
 async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCount) {
     const TEMPLATE_SID = process.env.PLAINTEXT_TEMPLATE_SID || 'HX...'; // Set this in Vercel env
     
+    console.log(`🔍 TEMPLATE DEBUG: PLAINTEXT_TEMPLATE_SID = "${TEMPLATE_SID}"`);
+    console.log(`🔍 TEMPLATE DEBUG: Environment check = ${!!process.env.PLAINTEXT_TEMPLATE_SID}`);
+    
     if (!TEMPLATE_SID || TEMPLATE_SID === 'HX...') {
+        console.log('❌ TEMPLATE DEBUG: Template SID not configured, throwing error');
         throw new Error('Plain text template SID not configured');
     }
     
@@ -583,9 +587,13 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
     const fromNumber = '+16466030424';
     
     console.log(`🚀 Sending plain text template - Count: ${contactCount}, Total: ${totalCount}`);
+    console.log(`🚀 Template SID: ${TEMPLATE_SID}`);
+    console.log(`🚀 From: whatsapp:${fromNumber}`);
+    console.log(`🚀 To: ${to}`);
+    console.log(`🚀 Contact preview length: ${contactPreview.length} chars`);
     console.log(`🚀 Attempting Plain Text Contact Template with Action Buttons...`);
     
-    await client.messages.create({
+    const templateMessage = await client.messages.create({
         from: `whatsapp:${fromNumber}`,
         to: to,
         messagingServiceSid: undefined,
@@ -598,6 +606,8 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
     });
     
     console.log('✅ Plain text contact template with action buttons sent successfully!');
+    console.log(`📋 Message SID: ${templateMessage.sid}`);
+    console.log(`📋 Template used: ${TEMPLATE_SID}`);
 }
 
 // Template 1: Status Message with Export Button
