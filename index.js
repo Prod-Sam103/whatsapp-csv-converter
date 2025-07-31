@@ -573,15 +573,22 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
     
     const fromNumber = '+16466030424';
     
+    // Build contact preview for {{2}} variable
+    const firstContact = contacts[0];
+    const contactPreview = `${firstContact.name || 'Contact'} - ${firstContact.mobile || firstContact.phone || 'No phone'}`;
+    
     console.log(`🚀 Sending plain text template - Count: ${contactCount}, Total: ${totalCount}`);
     console.log(`🚀 Template SID: ${TEMPLATE_SID}`);
     console.log(`🚀 From: whatsapp:${fromNumber}`);
     console.log(`🚀 To: ${to}`);
-    // Use exact same format as template sample content
-    const var1 = contactCount.toString(); // "1" 
-    const var3 = totalCount.toString();   // "1" 
+    console.log(`🚀 Contact preview: ${contactPreview}`);
     
-    console.log(`🚀 Template variables: {{1}}="${var1}", {{3}}="${var3}"`);
+    // Template variables for new 3-variable structure
+    const var1 = contactCount.toString();     // {{1}} - contacts found in message
+    const var2 = contactPreview;              // {{2}} - contact preview  
+    const var3 = totalCount.toString();       // {{3}} - total in batch
+    
+    console.log(`🚀 Template variables: {{1}}="${var1}", {{2}}="${var2}", {{3}}="${var3}"`);
     console.log(`🚀 Attempting Plain Text Contact Template with Action Buttons...`);
     
     const templateMessage = await client.messages.create({
@@ -590,6 +597,7 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
         contentSid: TEMPLATE_SID,
         contentVariables: JSON.stringify({
             "1": var1,
+            "2": var2,
             "3": var3
         })
     });
