@@ -990,15 +990,21 @@ _Dual template system ready!_`);
             }
             
             console.log(`📝 Plain text message received (${sanitizedBody.length} chars)`);
+            console.log(`📝 Sanitized body preview: "${sanitizedBody.substring(0, 100)}..."`);
             
             try {
                 // Use enhanced text parser to extract contacts from message
                 const { parseContactFile } = require('./src/csv-excel-parser');
+                console.log(`📝 About to call parseContactFile with text/plain type`);
+                
                 const extractedContacts = await parseContactFile(sanitizedBody, 'text/plain');
                 
+                console.log(`📝 parseContactFile completed successfully`);
                 console.log(`📝 Extracted ${extractedContacts.length} contacts from plain text`);
                 
                 if (extractedContacts.length > 0) {
+                    console.log(`📝 Contacts found, processing batch for ${From}`);
+                    
                     // Get existing batch or create new one
                     let batch = await storage.get(`batch:${From}`) || { 
                         contacts: [], 
@@ -1007,14 +1013,24 @@ _Dual template system ready!_`);
                         textMessages: 0 
                     };
                     
+                    console.log(`📝 Retrieved batch with ${batch.contacts.length} existing contacts`);
+                    
                     // Add extracted contacts to batch
                     batch.contacts.push(...extractedContacts);
                     batch.count = batch.contacts.length;
                     batch.textMessages = (batch.textMessages || 0) + 1;
                     batch.lastUpdated = Date.now();
                     
+                    console.log(`📝 Updated batch: ${batch.count} total contacts, ${batch.textMessages} text messages`);
+                    
                     // Save batch with extended timeout for text interaction
+                    console.log(`📝 Saving batch to storage...`);
                     await storage.set(`batch:${From}`, batch, BATCH_TIMEOUT);
+                    console.log(`📝 Batch saved successfully`);
+                    
+                    // Verify batch was saved
+                    const verifyBatch = await storage.get(`batch:${From}`);
+                    console.log(`📝 Verification: ${verifyBatch ? verifyBatch.count : 'null'} contacts in saved batch`);
                     
                     // Send interactive preview message
                     let previewMessage = `📝 **Found ${extractedContacts.length} contact(s) in your message!**\n\n`;
@@ -1046,6 +1062,9 @@ _Dual template system ready!_`);
                 
             } catch (textError) {
                 console.error('📝 Plain text parsing failed:', textError);
+                console.error('📝 Error stack:', textError.stack);
+                console.error('📝 Error message:', textError.message);
+                console.error('📝 Body that caused error:', sanitizedBody.substring(0, 200));
                 
                 // Fallback to welcome message
                 twiml.message(`👋 **Welcome to Contact Converter!**\n\nSend your contact files or plain text with contact details!\n\n📱 Works with: iPhone contacts, Android contacts, Excel files\n⚡ Enhanced text parsing for event planners\n\n💡 Just send your contacts and tap "Export" when done!\n\nType "help" for more info.`);
