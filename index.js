@@ -985,7 +985,7 @@ _Dual template system ready!_`);
                 twiml.message(`❌ Template test failed: ${error.message}`);
             }
             
-        } else if (Body && Body.trim() && NumMedia === 0) {
+        } else if (Body && Body.trim() && (NumMedia === 0 || NumMedia === '0')) {
             // PLAIN TEXT CONTACT EXTRACTION
             console.log(`🌟 PLAIN TEXT BRANCH TRIGGERED for ${From}`);
             console.log(`🌟 Body: "${Body.substring(0, 50)}..."`);
