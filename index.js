@@ -571,18 +571,8 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
     // Initialize Twilio client
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
-    // Build contact preview (up to 3 contacts)
-    let contactPreview = '';
-    contacts.slice(0, 3).forEach((contact, index) => {
-        contactPreview += `${index + 1}. *${contact.name || 'Contact'}*\n`;
-        if (contact.mobile) contactPreview += `   📱 ${contact.mobile}\n`;
-        if (contact.email) contactPreview += `   📧 ${contact.email}\n`;
-        contactPreview += `\n`;
-    });
-    
-    if (contacts.length > 3) {
-        contactPreview += `... and ${contacts.length - 3} more\n`;
-    }
+    // Build simple contact count string for {{3}} variable
+    const contactCountString = totalCount === 1 ? '1' : totalCount.toString();
     
     const fromNumber = '+16466030424';
     
