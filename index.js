@@ -839,8 +839,10 @@ ${downloadUrl}
             // AUTO-BATCH CONTACT PROCESSING
             console.log(`📎 ${NumMedia} contact file(s) detected - Starting auto-batch processing`);
             
-            // Get existing batch or create new one
-            let batch = await storage.get(`batch:${From}`) || { contacts: [], count: 0, filesProcessed: 0 };
+            // Get existing contacts using session store (consistent with export)
+            const cleanPhone = From.replace('whatsapp:', '');
+            const existingContacts = await store.get(`contacts:${cleanPhone}`) || [];
+            let batch = { contacts: existingContacts, count: existingContacts.length, filesProcessed: 0 };
             let totalNewContacts = 0;
             let processedFiles = 0;
             let failedFiles = 0;
@@ -942,8 +944,8 @@ ${downloadUrl}
             batch.filesProcessed += processedFiles;
             batch.lastUpdated = Date.now();
             
-            // Save batch (expires in 20 minutes)
-            await storage.set(`batch:${From}`, batch, BATCH_TIMEOUT);
+            // Save contacts using session store (consistent with export)
+            await store.set(`contacts:${cleanPhone}`, batch.contacts, 7200); // 2 hours
             
             // Send Status Template with Export Button (instead of TwiML)
             try {
