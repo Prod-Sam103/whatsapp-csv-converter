@@ -556,6 +556,47 @@ async function parseContactFileScalable(fileContent, mediaType, filename) {
     }
 }
 
+// Plain Text Contact Template with Action Buttons
+async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCount) {
+    const TEMPLATE_SID = process.env.PLAINTEXT_TEMPLATE_SID || 'HX...'; // Set this in Vercel env
+    
+    if (!TEMPLATE_SID || TEMPLATE_SID === 'HX...') {
+        throw new Error('Plain text template SID not configured');
+    }
+    
+    // Build contact preview (up to 3 contacts)
+    let contactPreview = '';
+    contacts.slice(0, 3).forEach((contact, index) => {
+        contactPreview += `${index + 1}. *${contact.name || 'Contact'}*\n`;
+        if (contact.mobile) contactPreview += `   📱 ${contact.mobile}\n`;
+        if (contact.email) contactPreview += `   📧 ${contact.email}\n`;
+        contactPreview += `\n`;
+    });
+    
+    if (contacts.length > 3) {
+        contactPreview += `... and ${contacts.length - 3} more\n`;
+    }
+    
+    const fromNumber = process.env.TWILIO_PHONE_NUMBER?.replace('whatsapp:', '') || '';
+    
+    console.log(`🚀 Sending plain text template - Count: ${contactCount}, Total: ${totalCount}`);
+    console.log(`🚀 Attempting Plain Text Contact Template with Action Buttons...`);
+    
+    await client.messages.create({
+        from: `whatsapp:${fromNumber}`,
+        to: to,
+        messagingServiceSid: undefined,
+        contentSid: TEMPLATE_SID,
+        contentVariables: JSON.stringify({
+            "1": contactCount.toString(),
+            "2": contactPreview.trim(),
+            "3": totalCount.toString()
+        })
+    });
+    
+    console.log('✅ Plain text contact template with action buttons sent successfully!');
+}
+
 // Template 1: Status Message with Export Button
 async function sendStatusTemplateWithExportButton(to, batch) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -703,6 +744,7 @@ app.post('/webhook', async (req, res) => {
         // Handle Export button click or export command
         if (ButtonPayload === 'export_contacts' || 
             ButtonText === 'Export' || 
+            ButtonText === '📤 Export CSV' ||
             Body.toLowerCase() === 'export' ||
             Body === '1️⃣' || Body === '1') {
             
@@ -985,7 +1027,9 @@ _Dual template system ready!_`);
                 twiml.message(`❌ Template test failed: ${error.message}`);
             }
             
-        } else if (Body && Body.toLowerCase() === 'preview') {
+        } else if (Body && Body.toLowerCase() === 'preview' || 
+                   ButtonPayload === 'preview_contacts' ||
+                   ButtonText === '👁️ Preview All') {
             // PREVIEW BATCH CONTENTS using session store
             console.log(`🌟 PREVIEW BRANCH TRIGGERED for ${From}`);
             const cleanPhone = From.replace('whatsapp:', '');
@@ -1061,28 +1105,35 @@ _Dual template system ready!_`);
                     const verification = await store.get(`contacts:${cleanPhone}`);
                     console.log(`📝 Verification check: ${verification ? verification.length : 'null'} contacts found`);
                     
-                    // Send interactive preview message
-                    let previewMessage = `📝 **Found ${extractedContacts.length} contact(s) in your message!**\n\n`;
-                    
-                    // Show up to 3 contacts in preview
-                    extractedContacts.slice(0, 3).forEach((contact, index) => {
-                        previewMessage += `${index + 1}. **${contact.name || 'Contact'}**\n`;
-                        if (contact.mobile) previewMessage += `   📱 ${contact.mobile}\n`;
-                        if (contact.email) previewMessage += `   📧 ${contact.email}\n`;
-                        previewMessage += `\n`;
-                    });
-                    
-                    if (extractedContacts.length > 3) {
-                        previewMessage += `... and ${extractedContacts.length - 3} more\n\n`;
+                    // Send interactive template with buttons or fallback
+                    try {
+                        await sendPlainTextContactTemplate(From, extractedContacts.length, extractedContacts, totalCount);
+                    } catch (templateError) {
+                        console.error('📝 Plain text template failed, using TwiML fallback:', templateError);
+                        
+                        // Fallback to TwiML message
+                        let previewMessage = `📝 **Found ${extractedContacts.length} contact(s) in your message!**\n\n`;
+                        
+                        // Show up to 3 contacts in preview
+                        extractedContacts.slice(0, 3).forEach((contact, index) => {
+                            previewMessage += `${index + 1}. **${contact.name || 'Contact'}**\n`;
+                            if (contact.mobile) previewMessage += `   📱 ${contact.mobile}\n`;
+                            if (contact.email) previewMessage += `   📧 ${contact.email}\n`;
+                            previewMessage += `\n`;
+                        });
+                        
+                        if (extractedContacts.length > 3) {
+                            previewMessage += `... and ${extractedContacts.length - 3} more\n\n`;
+                        }
+                        
+                        previewMessage += `💾 **Total in batch: ${totalCount} contacts**\n\n`;
+                        previewMessage += `**Options:**\n`;
+                        previewMessage += `📤 Type "export" to download CSV\n`;
+                        previewMessage += `➕ Send more contacts to add them\n`;
+                        previewMessage += `👁️ Type "preview" to see all contacts`;
+                        
+                        twiml.message(previewMessage);
                     }
-                    
-                    previewMessage += `💾 **Total in batch: ${totalCount} contacts**\n\n`;
-                    previewMessage += `**Options:**\n`;
-                    previewMessage += `📤 Type "export" to download CSV\n`;
-                    previewMessage += `➕ Send more contacts to add them\n`;
-                    previewMessage += `👁️ Type "preview" to see all contacts`;
-                    
-                    twiml.message(previewMessage);
                     
                 } else {
                     // No contacts found, but be helpful
