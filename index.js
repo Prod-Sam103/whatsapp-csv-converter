@@ -580,7 +580,7 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
         contactPreview += `... and ${contacts.length - 3} more\n`;
     }
     
-    const fromNumber = process.env.TWILIO_PHONE_NUMBER?.replace('whatsapp:', '') || '';
+    const fromNumber = '+16466030424';
     
     console.log(`🚀 Sending plain text template - Count: ${contactCount}, Total: ${totalCount}`);
     console.log(`🚀 Attempting Plain Text Contact Template with Action Buttons...`);
