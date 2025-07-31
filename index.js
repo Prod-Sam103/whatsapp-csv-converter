@@ -706,6 +706,7 @@ app.post('/webhook', async (req, res) => {
             Body.toLowerCase() === 'export' ||
             Body === '1️⃣' || Body === '1') {
             
+            console.log(`🌟 EXPORT BRANCH TRIGGERED for ${From}`);
             console.log(`📤 Export triggered via: ${ButtonText || ButtonPayload || Body}`);
             
             // Use session store to get and clear contacts
@@ -983,6 +984,10 @@ _Dual template system ready!_`);
             
         } else if (Body && Body.trim() && NumMedia === 0) {
             // PLAIN TEXT CONTACT EXTRACTION
+            console.log(`🌟 PLAIN TEXT BRANCH TRIGGERED for ${From}`);
+            console.log(`🌟 Body: "${Body.substring(0, 50)}..."`);
+            console.log(`🌟 NumMedia: ${NumMedia}`);
+            
             // SECURITY: Validate and sanitize input
             const sanitizedBody = validateAndSanitizeTextInput(Body);
             if (!sanitizedBody) {
