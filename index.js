@@ -590,7 +590,7 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
     console.log(`🚀 Template SID: ${TEMPLATE_SID}`);
     console.log(`🚀 From: whatsapp:${fromNumber}`);
     console.log(`🚀 To: ${to}`);
-    console.log(`🚀 Contact preview length: ${contactPreview.length} chars`);
+    console.log(`🚀 Template variables: {{1}}=${contactCount}, {{3}}=${totalCount}`);
     console.log(`🚀 Attempting Plain Text Contact Template with Action Buttons...`);
     
     const templateMessage = await client.messages.create({
@@ -600,7 +600,6 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
         contentSid: TEMPLATE_SID,
         contentVariables: JSON.stringify({
             "1": contactCount.toString(),
-            "2": contactPreview.trim(),
             "3": totalCount.toString()
         })
     });
