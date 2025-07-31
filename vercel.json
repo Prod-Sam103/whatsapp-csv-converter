@@ -1,31 +1,15 @@
 {
   "version": 2,
-  "functions": {
-    "index.js": {
-      "maxDuration": 30,
-      "memory": 1024
-    }
-  },
-  "routes": [
+  "builds": [
     {
-      "src": "/webhook",
-      "dest": "/index.js",
-      "methods": ["POST"]
-    },
-    {
-      "src": "/download/(.*)",
-      "dest": "/index.js"
-    },
-    {
-      "src": "/get/(.*)",
-      "dest": "/index.js"
-    },
-    {
-      "src": "/",
-      "dest": "/index.js"
+      "src": "index.js",
+      "use": "@vercel/node"
     }
   ],
-  "env": {
-    "NODE_ENV": "production"
-  }
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/index.js"
+    }
+  ]
 }
