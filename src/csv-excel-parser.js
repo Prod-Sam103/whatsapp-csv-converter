@@ -5,15 +5,15 @@
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const log = (...args) => {
     if (!IS_PRODUCTION) {
-        log(...args);
+        console.log(...args);
     }
 };
 const logError = (...args) => {
     if (!IS_PRODUCTION) {
-        logError(...args);
+        console.error(...args);
     } else {
         // Only log sanitized error messages in production
-        logError('Parser error occurred');
+        console.error('Parser error occurred');
     }
 };
 

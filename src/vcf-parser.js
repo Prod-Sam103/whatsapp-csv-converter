@@ -4,14 +4,14 @@
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const log = (...args) => {
     if (!IS_PRODUCTION) {
-        log(...args);
+        console.log(...args);
     }
 };
 const logError = (...args) => {
     if (!IS_PRODUCTION) {
-        logError(...args);
+        console.error(...args);
     } else {
-        logError('VCF parser error occurred');
+        console.error('VCF parser error occurred');
     }
 };
 function parseVCF(vcfContent) {

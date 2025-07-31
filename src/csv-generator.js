@@ -4,7 +4,7 @@
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const log = (...args) => {
     if (!IS_PRODUCTION) {
-        log(...args);
+        console.log(...args);
     }
 };
 function generateCSV(contacts) {
