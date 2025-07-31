@@ -1240,9 +1240,11 @@ function validateFileId(fileId) {
         return false;
     }
     
-    // Must be a valid UUID format (36 characters with dashes)
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(fileId)) {
+    // Must be a valid file ID format (16-character hex string or full UUID)
+    const shortIdRegex = /^[0-9a-f]{16}$/i; // 16-char hex string
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i; // Full UUID
+    
+    if (!shortIdRegex.test(fileId) && !uuidRegex.test(fileId)) {
         console.log(`🚨 Invalid file ID format: ${fileId}`);
         return false;
     }
