@@ -805,8 +805,8 @@ When you're ready, type "export" to download your CSV! 📤`);
             
             console.log(`📝 CSV generated in ${csvTime}ms (${(csv.length / 1024).toFixed(2)}KB)`);
             
-            // Create secure file with clean UUID
-            const fileId = uuidv4();
+            // Create secure file with shorter ID for WhatsApp template compatibility
+            const fileId = uuidv4().replace(/-/g, '').substring(0, 16); // 16 char hex string
             console.log(`📝 Creating file with clean ID: ${fileId}`);
             
             await storage.set(`file:${fileId}`, {
