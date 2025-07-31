@@ -1020,8 +1020,16 @@ _Dual template system ready!_`);
                     const cleanPhone = From.replace('whatsapp:', '');
                     console.log(`📝 Adding ${extractedContacts.length} contacts to batch for ${cleanPhone}`);
                     
+                    console.log(`📝 About to call store.appendContacts with phone: ${cleanPhone}`);
+                    console.log(`📝 Contacts to append:`, extractedContacts);
+                    
                     const totalCount = await store.appendContacts(cleanPhone, extractedContacts);
+                    console.log(`📝 store.appendContacts returned: ${totalCount}`);
                     console.log(`📝 Batch now contains ${totalCount} total contacts`);
+                    
+                    // Verify contacts were saved
+                    const verification = await store.get(`contacts:${cleanPhone}`);
+                    console.log(`📝 Verification check: ${verification ? verification.length : 'null'} contacts found`);
                     
                     // Send interactive preview message
                     let previewMessage = `📝 **Found ${extractedContacts.length} contact(s) in your message!**\n\n`;
