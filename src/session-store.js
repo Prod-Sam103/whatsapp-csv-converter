@@ -50,15 +50,25 @@ class Store {
 
   async get(key) {
     console.log(`🔄 SESSION-STORE: get called for key ${key}`);
+    console.log(`🔄 SESSION-STORE: Redis available: ${!!this.redis}, Disabled: ${!!this.disabled}`);
+    
+    // Always check memory first, then Redis as fallback
+    const memResult = MEM[key] || null;
+    console.log(`🔄 SESSION-STORE: Memory get result: ${memResult ? (Array.isArray(memResult) ? memResult.length + ' items' : typeof memResult) : 'null'}`);
+    
+    if (memResult) {
+      return memResult;
+    }
+    
+    // If not in memory and Redis is available, check Redis
     if (this.redis && !this.disabled) {
       const raw = await this.redis.get(key);
-      const result = raw ? JSON.parse(raw) : null;
-      console.log(`🔄 SESSION-STORE: Redis get result: ${result ? (Array.isArray(result) ? result.length + ' items' : typeof result) : 'null'}`);
-      return result;
+      const redisResult = raw ? JSON.parse(raw) : null;
+      console.log(`🔄 SESSION-STORE: Redis get result: ${redisResult ? (Array.isArray(redisResult) ? redisResult.length + ' items' : typeof redisResult) : 'null'}`);
+      return redisResult;
     }
-    const result = MEM[key] || null;
-    console.log(`🔄 SESSION-STORE: Memory get result: ${result ? (Array.isArray(result) ? result.length + ' items' : typeof result) : 'null'}`);
-    return result;
+    
+    return null;
   }
 
   async del(key) {
