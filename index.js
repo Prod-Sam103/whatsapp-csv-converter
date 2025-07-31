@@ -571,26 +571,26 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
     // Initialize Twilio client
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
-    // Build simple contact count string for {{3}} variable
-    const contactCountString = totalCount === 1 ? '1' : totalCount.toString();
-    
     const fromNumber = '+16466030424';
     
     console.log(`🚀 Sending plain text template - Count: ${contactCount}, Total: ${totalCount}`);
     console.log(`🚀 Template SID: ${TEMPLATE_SID}`);
     console.log(`🚀 From: whatsapp:${fromNumber}`);
     console.log(`🚀 To: ${to}`);
-    console.log(`🚀 Template variables: {{1}}=${contactCount}, {{3}}=${totalCount}`);
+    // Use exact same format as template sample content
+    const var1 = contactCount.toString(); // "1" 
+    const var3 = totalCount.toString();   // "1" 
+    
+    console.log(`🚀 Template variables: {{1}}="${var1}", {{3}}="${var3}"`);
     console.log(`🚀 Attempting Plain Text Contact Template with Action Buttons...`);
     
     const templateMessage = await client.messages.create({
         from: `whatsapp:${fromNumber}`,
         to: to,
-        messagingServiceSid: undefined,
         contentSid: TEMPLATE_SID,
         contentVariables: JSON.stringify({
-            "1": contactCount.toString(),
-            "3": totalCount.toString()
+            "1": var1,
+            "3": var3
         })
     });
     
