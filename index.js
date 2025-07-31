@@ -741,10 +741,34 @@ app.post('/webhook', async (req, res) => {
             return;
         }
         
-        // Handle Export button click or export command
-        if (ButtonPayload === 'export_contacts' || 
+        // Handle Add More button - encourage sending more contacts
+        if (ButtonPayload === 'add_more_contacts' || 
+            ButtonText === 'Add More') {
+            
+            console.log(`🌟 ADD MORE BRANCH TRIGGERED for ${From}`);
+            const cleanPhone = From.replace('whatsapp:', '');
+            const contacts = await store.get(`contacts:${cleanPhone}`) || [];
+            
+            const contactCount = contacts.length;
+            const contactWord = contactCount === 1 ? 'contact' : 'contacts';
+            
+            twiml.message(`📝 **Great! You have ${contactCount} ${contactWord} ready for export.**
+
+**Keep adding more contacts:**
+• Send contact files (VCF, CSV, Excel, PDF, DOCX)
+• Send plain text with contact details
+• Mix and match - system auto-batches everything!
+
+**Examples:**
+• John Doe +2348123456789 john@example.com
+• Jane Smith: 08012345678
+
+When you're ready, type "export" to download your CSV! 📤`);
+
+        // Handle Export button click or export command  
+        } else if (ButtonPayload === 'export_contacts' || 
             ButtonText === 'Export' || 
-            ButtonText === '📤 Export CSV' ||
+            ButtonText === 'Export CSV' ||
             Body.toLowerCase() === 'export' ||
             Body === '1️⃣' || Body === '1') {
             
