@@ -898,7 +898,8 @@ ${downloadUrl}
                 twiml.message(statusMessage);
             }
             
-        } else if (Body.toLowerCase() === 'help') {
+        } else if (Body && Body.toLowerCase() === 'help') {
+            console.log(`🌟 HELP BRANCH TRIGGERED for ${From}`);
             twiml.message(`🎖️ **WhatsApp CSV Converter**
 
 📋 **HOW TO USE:**
@@ -939,7 +940,8 @@ ${downloadUrl}
 
 _Ready for your contacts!_`);
             
-        } else if (Body.toLowerCase() === 'test') {
+        } else if (Body && Body.toLowerCase() === 'test') {
+            console.log(`🌟 TEST BRANCH TRIGGERED for ${From}`);
             const fileCount = await getActiveFileCount();
             
             twiml.message(`✅ **Dual Template Systems Check Complete**
@@ -965,7 +967,8 @@ _Ready for your contacts!_`);
 
 _Dual template system ready!_`);
             
-        } else if (Body.toLowerCase() === 'testtemplate') {
+        } else if (Body && Body.toLowerCase() === 'testtemplate') {
+            console.log(`🌟 TESTTEMPLATE BRANCH TRIGGERED for ${From}`);
             // Test both templates
             try {
                 const testFileId = 'test-' + Date.now();
@@ -1089,6 +1092,13 @@ _Dual template system ready!_`);
             
         } else {
             // Welcome message
+            console.log(`🌟 WELCOME BRANCH TRIGGERED for ${From}`);
+            console.log(`🌟 Body: "${Body}"`);
+            console.log(`🌟 NumMedia: ${NumMedia}`);
+            console.log(`🌟 Body exists: ${!!Body}`);
+            console.log(`🌟 Body.trim(): "${Body?.trim()}"`);
+            console.log(`🌟 NumMedia === 0: ${NumMedia === 0}`);
+            
             twiml.message(`👋 **Welcome to Contact Converter!**
 
 Send your contact files for instant CSV conversion! 
