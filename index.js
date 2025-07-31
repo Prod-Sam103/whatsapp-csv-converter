@@ -762,18 +762,18 @@ app.post('/webhook', async (req, res) => {
             const contactCount = contacts.length;
             const contactWord = contactCount === 1 ? 'contact' : 'contacts';
             
-            twiml.message(`📝 **Great! You have ${contactCount} ${contactWord} ready for export.**
+            twiml.message(`📝 **Great! You have ${contactCount} ${contactWord} ready for Sugar Guest Pro export.**
 
-**Keep adding more contacts:**
+**Keep adding more guest contacts:**
 • Send contact files (VCF, CSV, Excel, PDF, DOCX)
-• Send plain text with contact details
+• Send plain text with guest details
 • Mix and match - system auto-batches everything!
 
 **Examples:**
-• John Doe +2348123456789 john@example.com
-• Jane Smith: 08012345678
+• John Doe +2348123456789 john@example.com (Best Man)
+• Jane Smith: 08012345678 (Maid of Honor)
 
-When you're ready, type "export" to download your CSV! 📤`);
+When you're ready, type "export" to download your Sugar Guest Pro CSV! 📤`);
 
         // Handle Export button click or export command  
         } else if (ButtonPayload === 'export_contacts' || 
@@ -790,7 +790,7 @@ When you're ready, type "export" to download your CSV! 📤`);
             const contacts = await store.popContacts(cleanPhone);
             
             if (!contacts || contacts.length === 0) {
-                twiml.message(`❌ No contacts to export.\n\nSend some contact files first!`);
+                twiml.message(`❌ No guest contacts to export for Sugar Guest Pro.\n\nSend some guest list files or contact information first!`);
                 res.type('text/xml');
                 res.send(twiml.toString());
                 return;
@@ -824,13 +824,13 @@ When you're ready, type "export" to download your CSV! 📤`);
                 console.error('❌ Download template failed, using TwiML fallback:', downloadError);
                 
                 const downloadUrl = `${BASE_URL}/get/${fileId}`;
-                twiml.message(`✅ **Your CSV file with ${contacts.length} contacts is ready!**
+                twiml.message(`✅ **Your Sugar Guest Pro CSV file with ${contacts.length} contacts is ready!**
 
-📎 *Download CSV*
+📎 *Download Sugar Guest Pro CSV*
 ${downloadUrl}
 
 ⏰ _Link expires in 2 hours_
-💡 _Tap the link above to download your file_`);
+💡 _Perfect for importing into Sugar Guest Pro!_`);
             }
             
             // Batch is already cleared by popContacts()
@@ -978,56 +978,58 @@ ${downloadUrl}
             
         } else if (Body && Body.toLowerCase() === 'help') {
             console.log(`🌟 HELP BRANCH TRIGGERED for ${From}`);
-            twiml.message(`🎖️ **WhatsApp CSV Converter**
+            twiml.message(`🎖️ **Sugar Guest Pro Contact Processor**
 
 📋 **HOW TO USE:**
-1. Send your contact files OR plain text
+1. Send your contact files OR plain text guest lists
 2. Keep sending more if needed
 3. Tap "Export" button when done
 
+Perfect for event professionals:
+• Guest list organization
+• Vendor contact management
+• Client database building
+• Wedding planning contacts
+
 📂 **Supported Formats:**
    📇 VCF (phone contacts)
-   📊 CSV
-   📗 Excel
-   📄 PDF
-   📝 Plain Text Messages
-   📘 DOCX
+   📊 CSV & Excel files
+   📄 PDF & Word documents
+   📝 Plain text messages & guest lists
 
 ⚡ **FEATURES:**
-✅ Auto-batching system
-✅ Up to 250 contacts per batch
+✅ Sugar Guest Pro-ready CSV files
 ✅ Interactive Export & Download buttons
-✅ Plain text contact extraction
-✅ Works with iPhone & Android
+✅ Smart duplicate detection
+✅ Professional event formatting
 
 💡 **TIPS:**
 • Send multiple files at once
 • WhatsApp sends 10 files max per message
 • Just keep sending - system auto-batches
-• Tap "Export" button to download CSV
+• Tap "Export" for Sugar Guest Pro CSV
 
-📝 **Plain Text Examples:**
-• John Doe +2348123456789 john@example.com
-• Jane Smith: 08012345678
-• Bob Wilson - +44 20 7946 0958 bob@company.com
+📝 **Guest List Examples:**
+• John Doe +2348123456789 john@example.com (Best Man)
+• Jane Smith: 08012345678 (Maid of Honor)
+• Bob Wilson - +44 20 7946 0958 bob@company.com (Vendor)
 
 🔍 **Commands:**
-• "export" - Download CSV file
-• "preview" - See all contacts in batch
+• "export" - Download Sugar Guest Pro CSV
 • "help" - Show this message
 
-_Ready for your contacts!_`);
+_Ready for your guest contacts!_`);
             
         } else if (Body && Body.toLowerCase() === 'test') {
             console.log(`🌟 TEST BRANCH TRIGGERED for ${From}`);
             const fileCount = await getActiveFileCount();
             
-            twiml.message(`✅ **Dual Template Systems Check Complete**
+            twiml.message(`✅ **Sugar Guest Pro System Check Complete**
 
 🟢 Bot: OPERATIONAL
 🟢 Auto-Batching: ACTIVE
 🟢 Status Template with Export Button: ${STATUS_TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}
-🟢 Download Template with CSV Button: ${DOWNLOAD_TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}
+🟢 Download Template with Sugar Guest Pro CSV: ${DOWNLOAD_TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}
 🟢 Storage: ${redisClient ? 'REDIS OPTIMISED' : 'MEMORY'}
 
 **Template Configuration:**
@@ -1043,7 +1045,7 @@ _Ready for your contacts!_`);
 **Supported Formats:**
 📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text • 📘 DOCX
 
-_Dual template system ready!_`);
+_Ready for professional event management!_`);
             
         } else if (Body && Body.toLowerCase() === 'testtemplate') {
             console.log(`🌟 TESTTEMPLATE BRANCH TRIGGERED for ${From}`);
@@ -1072,7 +1074,7 @@ _Dual template system ready!_`);
             const contacts = await store.get(`contacts:${cleanPhone}`) || [];
             
             if (contacts.length === 0) {
-                twiml.message(`📝 **No contacts in your batch yet.**\n\nSend contact files or plain text messages with contact details to get started!`);
+                twiml.message(`📝 **No guest contacts in your batch yet.**\n\nSend guest list files, contact files, or plain text messages with guest details to get started with Sugar Guest Pro!`);
             } else {
                 let previewMessage = `📋 **Batch Preview (${contacts.length} contacts):**\n\n`;
                 
@@ -1104,7 +1106,7 @@ _Dual template system ready!_`);
             // SECURITY: Validate and sanitize input
             const sanitizedBody = validateAndSanitizeTextInput(Body);
             if (!sanitizedBody) {
-                twiml.message(`❌ **Invalid input detected.**\n\nPlease send valid contact information or files.`);
+                twiml.message(`❌ **Invalid guest information detected.**\n\nPlease send valid contact information, guest lists, or contact files for Sugar Guest Pro processing.`);
                 res.type('text/xml');
                 res.send(twiml.toString());
                 return;
@@ -1176,7 +1178,7 @@ _Dual template system ready!_`);
                     
                 } else {
                     // No contacts found, but be helpful
-                    twiml.message(`📝 **No contacts detected in your message.**\n\n**Examples of supported formats:**\n• John Doe +2348123456789 john@example.com\n• Jane Smith: 08012345678\n• Bob Wilson - +44 20 7946 0958 bob@company.com\n\n**Or send contact files directly!**\n\nType "help" for more info.`);
+                    twiml.message(`📝 **No guest contacts detected in your message.**\n\n**Examples of supported formats for event planning:**\n• John Doe +2348123456789 john@example.com (Best Man)\n• Jane Smith: 08012345678 (Maid of Honor)\n• Bob Wilson - +44 20 7946 0958 bob@company.com (Vendor)\n\n**Or send guest list files directly!**\n\nType "help" for event planning tips.`);
                 }
                 
             } catch (textError) {
@@ -1186,7 +1188,7 @@ _Dual template system ready!_`);
                 console.error('📝 Body that caused error:', sanitizedBody.substring(0, 200));
                 
                 // Fallback to welcome message
-                twiml.message(`👋 **Welcome to Contact Converter!**\n\nSend your contact files or plain text with contact details!\n\n📱 Works with: iPhone contacts, Android contacts, Excel files\n⚡ Enhanced text parsing for event planners\n\n💡 Just send your contacts and tap "Export" when done!\n\nType "help" for more info.`);
+                twiml.message(`✨ **Smart Contact Processor for Sugar Guest Pro**\n\nI'm your personal assistant for organizing contacts into Sugar Guest Pro-ready CSV files!\n\n🎪 **I work with everything:**\n📱 Phone contacts (iPhone, Android)\n📊 Spreadsheets (Excel, CSV)\n📄 Documents (PDF, Word)\n💬 WhatsApp messages (just paste it) & text lists\n📝 Event guest lists & business cards\n\n🎯 **Built for event professionals:**\nWhether you're planning weddings, corporate events, parties, or managing guest lists - I make Sugar Guest Pro imports effortless!\n\nSend me your contacts (any format) → Get Sugar Guest Pro CSV file\n\nType "help" for more info.`);
             }
             
         } else {
@@ -1198,15 +1200,21 @@ _Dual template system ready!_`);
             console.log(`🌟 Body.trim(): "${Body?.trim()}"`);
             console.log(`🌟 NumMedia === 0: ${NumMedia === 0}`);
             
-            twiml.message(`👋 **Welcome to Contact Converter!**
+            twiml.message(`✨ **Smart Contact Processor for Sugar Guest Pro**
 
-Send your contact files for instant CSV conversion! 
+I'm your personal assistant for organizing contacts into Sugar Guest Pro-ready CSV files!
 
-📱 Works with: iPhone contacts, Android contacts, Excel files
-⚡ Dual template system with Export & Download buttons
-📝 Enhanced text parsing for plain text contacts
+🎪 **I work with everything:**
+📱 Phone contacts (iPhone, Android)
+📊 Spreadsheets (Excel, CSV)
+📄 Documents (PDF, Word)
+💬 WhatsApp messages (just paste it) & text lists
+📝 Event guest lists & business cards
 
-💡 Just send your contacts and tap "Export" when done!
+🎯 **Built for event professionals:**
+Whether you're planning weddings, corporate events, parties, or managing guest lists - I make Sugar Guest Pro imports effortless!
+
+Send me your contacts (any format) → Get Sugar Guest Pro CSV file
 
 Type "help" for more info.`);
         }
