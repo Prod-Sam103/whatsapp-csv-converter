@@ -85,7 +85,8 @@ const AUTHORIZED_NUMBERS = [
     '+2347061240799',  // New authorized number
     '+2347034988523', // New authorized number
     '+2349065729552', // New authorized number
-    '+2348132474537'  // New authorized number
+    '+2348132474537', // New authorized number
+    '+2348066196638'  // Additional authorized number
 ];
 
 // Template Configuration - TWO TEMPLATES
@@ -1647,7 +1648,9 @@ app.listen(PORT, () => {
     console.log('   - +2348121364213 (Primary)');
     console.log('   - +2347061240799 (Secondary)');
     console.log('   - +2347034988523 (Tertiary)');
-    console.log('   - +2348132474537 (Quaternary)');
+    console.log('   - +2349065729552 (Quaternary)');
+    console.log('   - +2348132474537 (Quinary)');
+    console.log('   - +2348066196638 (Senary)');
     console.log('\n📋 TEMPLATE CONFIGURATION:');
     console.log(`   📤 Status Template SID: ${STATUS_TEMPLATE_SID || 'NOT CONFIGURED'}`);
     console.log(`   📥 Download Template SID: ${DOWNLOAD_TEMPLATE_SID || 'NOT CONFIGURED'}`);
