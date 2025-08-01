@@ -1,22 +1,24 @@
-# WhatsApp CSV Converter - Enhanced Edition
+# Sugar Guest Pro Contact Processor - WhatsApp Integration
 
-A powerful WhatsApp bot that converts contact files and plain text contact lists into Excel-compatible CSV format. Perfect for event planners, business professionals, and anyone who needs to manage contact data efficiently.
+A specialized WhatsApp bot that converts contact files and guest lists into Sugar Guest Pro-ready CSV format. Built specifically for event professionals, wedding planners, and hospitality businesses who need seamless Sugar Guest Pro integration.
 
 ## 🚀 Features
 
 ### Core Functionality
+- **Sugar Guest Pro Integration**: Direct CSV export compatible with Sugar Guest Pro import
 - **Multi-Format Support**: VCF, CSV, Excel, PDF, Text, DOCX (6+ formats)
-- **Plain Text Parsing**: Extract contacts from WhatsApp messages and event guest lists
-- **Dual Template System**: Professional WhatsApp template buttons for seamless UX
-- **Auto-Batching**: Accumulate contacts from multiple sources before export
-- **Excel Compatibility**: UTF-8 BOM for perfect Excel import experience
+- **Guest List Processing**: Extract contacts from WhatsApp messages and event guest lists
+- **Interactive Template Buttons**: Professional WhatsApp template system with Export/Download buttons
+- **Auto-Batching**: Accumulate contacts from multiple sources before Sugar Guest Pro export
+- **Event Professional Focus**: Built specifically for wedding planners and event management
 
 ### Enhanced Capabilities
+- **Greeting Detection**: Responds to 20+ greeting patterns for professional onboarding
 - **Parallel Processing**: Handle up to 10 files simultaneously
 - **Scalable Storage**: Redis with chunking for large datasets
 - **Smart Detection**: Intelligent file type recognition and fallback parsing
-- **Nigerian Phone Formatting**: Automatic +234 formatting for local numbers
-- **Interactive Preview**: Preview extracted contacts before export
+- **International Phone Formatting**: Automatic formatting for global events
+- **Authorized Access**: Controlled access with authorized phone numbers
 - **Secure Downloads**: Time-limited download links with 2-hour expiry
 
 ## 📱 Supported Input Formats
