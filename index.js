@@ -1020,6 +1020,27 @@ Perfect for event professionals:
 
 _Ready for your guest contacts!_`);
             
+        } else if (Body && isGreeting(Body)) {
+            // Greeting detection - trigger welcome message
+            console.log(`👋 GREETING DETECTED: "${Body}" from ${From}`);
+            twiml.message(`✨ **Smart Contact Processor for Sugar Guest Pro**
+
+I'm your personal assistant for organizing contacts into Sugar Guest Pro-ready CSV files!
+
+🎪 **I work with everything:**
+📱 Phone contacts (iPhone, Android)
+📊 Spreadsheets (Excel, CSV)
+📄 Documents (PDF, Word)
+💬 WhatsApp messages (just paste it) & text lists
+📝 Event guest lists & business cards
+
+🎯 **Built for event professionals:**
+Whether you're planning weddings, corporate events, parties, or managing guest lists - I make Sugar Guest Pro imports effortless!
+
+Send me your contacts (any format) → Get Sugar Guest Pro CSV file
+
+Type "help" for more info.`);
+            
         } else if (Body && Body.toLowerCase() === 'test') {
             console.log(`🌟 TEST BRANCH TRIGGERED for ${From}`);
             const fileCount = await getActiveFileCount();
@@ -1241,6 +1262,40 @@ Type "help" for assistance.`);
     res.type('text/xml');
     res.send(twiml.toString());
 });
+
+// Greeting detection function
+function isGreeting(message) {
+    if (!message || typeof message !== 'string') {
+        return false;
+    }
+    
+    const greetings = [
+        'hello', 'hi', 'hey', 'hiya', 'helo', 'hallo',
+        'welcome', 'welcome message', 'welcome message?',
+        'start', 'begin', 'get started', 'getting started',
+        'good morning', 'good afternoon', 'good evening',
+        'greetings', 'salutations', 'howdy',
+        'yo', 'sup', 'whats up', "what's up",
+        'morning', 'afternoon', 'evening',
+        'hii', 'hiiii', 'helloooo', 'heyyyy'
+    ];
+    
+    const cleanMessage = message.toLowerCase().trim();
+    
+    // Check for exact matches
+    if (greetings.includes(cleanMessage)) {
+        return true;
+    }
+    
+    // Check for greetings with punctuation
+    const withoutPunctuation = cleanMessage.replace(/[^\w\s]/g, '').trim();
+    if (greetings.includes(withoutPunctuation)) {
+        return true;
+    }
+    
+    // Check if message starts with a greeting (for messages like "hi there" or "hello bot")
+    return greetings.some(greeting => cleanMessage.startsWith(greeting + ' ') || cleanMessage.startsWith(greeting));
+}
 
 // SECURITY: File ID validation to prevent path traversal
 function validateFileId(fileId) {
