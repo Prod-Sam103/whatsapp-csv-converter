@@ -741,7 +741,7 @@ app.post('/webhook', async (req, res) => {
             const contactCount = contacts.length;
             const contactWord = contactCount === 1 ? 'contact' : 'contacts';
             
-            twiml.message(`📝 **Great! You have ${contactCount} ${contactWord} ready for Sugar Guest Pro export.**
+            twiml.message(`📝 **Great! You have ${contactCount} ${contactWord} ready for CSV export.**
 
 **Keep adding more guest contacts:**
 • Send contact files (VCF, CSV, Excel, PDF, DOCX)
@@ -752,7 +752,7 @@ app.post('/webhook', async (req, res) => {
 • John Doe +2348123456789 john@example.com (Best Man)
 • Jane Smith: 08012345678 (Maid of Honor)
 
-When you're ready, type "export" to download your Sugar Guest Pro CSV! 📤`);
+When you're ready, type "export" to download your CSV! 📤`);
 
         // Handle Export button click or export command  
         } else if (ButtonPayload === 'export_contacts' || 
@@ -769,7 +769,7 @@ When you're ready, type "export" to download your Sugar Guest Pro CSV! 📤`);
             const contacts = await store.popContacts(cleanPhone);
             
             if (!contacts || contacts.length === 0) {
-                twiml.message(`❌ No guest contacts to export for Sugar Guest Pro.\n\nSend some guest list files or contact information first!`);
+                twiml.message(`❌ No contacts to export.\n\nSend some VCF files or contact information first!`);
                 res.type('text/xml');
                 res.send(twiml.toString());
                 return;
@@ -957,7 +957,7 @@ ${downloadUrl}
             
         } else if (Body && Body.toLowerCase() === 'help') {
             console.log(`🌟 HELP BRANCH TRIGGERED for ${From}`);
-            twiml.message(`🎖️ **Sugar Guest Pro Contact Processor**
+            twiml.message(`📱 **Contact Processor**
 
 📋 **HOW TO USE:**
 1. Send your contact files OR plain text guest lists
@@ -977,7 +977,7 @@ Perfect for event professionals:
    📝 Plain text messages & guest lists
 
 ⚡ **FEATURES:**
-✅ Sugar Guest Pro-ready CSV files
+✅ CSV file exports
 ✅ Interactive Export & Download buttons
 ✅ Smart duplicate detection
 ✅ Professional event formatting
@@ -986,7 +986,7 @@ Perfect for event professionals:
 • Send multiple files at once
 • WhatsApp sends 10 files max per message
 • Just keep sending - system auto-batches
-• Tap "Export" for Sugar Guest Pro CSV
+• Tap "Export" for CSV download
 
 📝 **Guest List Examples:**
 • John Doe +2348123456789 john@example.com (Best Man)
@@ -994,7 +994,7 @@ Perfect for event professionals:
 • Bob Wilson - +44 20 7946 0958 bob@company.com (Vendor)
 
 🔍 **Commands:**
-• "export" - Download Sugar Guest Pro CSV
+• "export" - Download CSV file
 • "help" - Show this message
 
 _Ready for your guest contacts!_`);
@@ -1002,21 +1002,15 @@ _Ready for your guest contacts!_`);
         } else if (Body && isGreeting(Body)) {
             // Greeting detection - trigger welcome message
             console.log(`👋 GREETING DETECTED: "${Body}" from ${From}`);
-            twiml.message(`✨ **Smart Contact Processor for Sugar Guest Pro**
+            twiml.message(`✨ **Contact Processor**
 
-I'm your personal assistant for organizing contacts into Sugar Guest Pro-ready CSV files!
+I help you organize contacts into CSV files!
 
-🎪 **I work with everything:**
-📱 Phone contacts (iPhone, Android)
-📊 Spreadsheets (Excel, CSV)
-📄 Documents (PDF, Word)
-💬 WhatsApp messages (just paste it) & text lists
-📝 Event guest lists & business cards
+📱 **I work with:**
+📇 VCF files (phone contact exports)
+📝 Plain text contact information
 
-🎯 **Built for event professionals:**
-Whether you're planning weddings, corporate events, parties, or managing guest lists - I make Sugar Guest Pro imports effortless!
-
-Send me your contacts (any format) → Get Sugar Guest Pro CSV file
+Send me your contacts → Get CSV file
 
 Type "help" for more info.`);
             
@@ -1024,12 +1018,12 @@ Type "help" for more info.`);
             console.log(`🌟 TEST BRANCH TRIGGERED for ${From}`);
             const fileCount = await getActiveFileCount();
             
-            twiml.message(`✅ **Sugar Guest Pro System Check Complete**
+            twiml.message(`✅ **Contact Processor System Check Complete**
 
 🟢 Bot: OPERATIONAL
 🟢 Auto-Batching: ACTIVE
 🟢 Status Template with Export Button: ${STATUS_TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}
-🟢 Download Template with Sugar Guest Pro CSV: ${DOWNLOAD_TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}
+🟢 Download Template with CSV: ${DOWNLOAD_TEMPLATE_SID ? 'CONFIGURED' : 'NOT SET'}
 🟢 Storage: ${redisClient ? 'REDIS OPTIMISED' : 'MEMORY'}
 
 **Template Configuration:**
@@ -1142,7 +1136,7 @@ _Ready for contact processing!_`);
                 console.error('📝 Body that caused error:', sanitizedBody.substring(0, 200));
                 
                 // Fallback to welcome message
-                twiml.message(`✨ **Smart Contact Processor for Sugar Guest Pro**\n\nI'm your personal assistant for organizing contacts into Sugar Guest Pro-ready CSV files!\n\n🎪 **I work with everything:**\n📱 Phone contacts (iPhone, Android)\n📊 Spreadsheets (Excel, CSV)\n📄 Documents (PDF, Word)\n💬 WhatsApp messages (just paste it) & text lists\n📝 Event guest lists & business cards\n\n🎯 **Built for event professionals:**\nWhether you're planning weddings, corporate events, parties, or managing guest lists - I make Sugar Guest Pro imports effortless!\n\nSend me your contacts (any format) → Get Sugar Guest Pro CSV file\n\nType "help" for more info.`);
+                twiml.message(`✨ **Contact Processor**\n\nI help you organize contacts into CSV files!\n\n📱 **I work with:**\n📇 VCF files (phone contact exports)\n📝 Plain text contact information\n\nSend me your contacts → Get CSV file\n\nType "help" for more info.`);
             }
             
         } else {
@@ -1154,21 +1148,15 @@ _Ready for contact processing!_`);
             console.log(`🌟 Body.trim(): "${Body?.trim()}"`);
             console.log(`🌟 NumMedia === 0: ${NumMedia === 0}`);
             
-            twiml.message(`✨ **Smart Contact Processor for Sugar Guest Pro**
+            twiml.message(`✨ **Contact Processor**
 
-I'm your personal assistant for organizing contacts into Sugar Guest Pro-ready CSV files!
+I help you organize contacts into CSV files!
 
-🎪 **I work with everything:**
-📱 Phone contacts (iPhone, Android)
-📊 Spreadsheets (Excel, CSV)
-📄 Documents (PDF, Word)
-💬 WhatsApp messages (just paste it) & text lists
-📝 Event guest lists & business cards
+📱 **I work with:**
+📇 VCF files (phone contact exports)
+📝 Plain text contact information
 
-🎯 **Built for event professionals:**
-Whether you're planning weddings, corporate events, parties, or managing guest lists - I make Sugar Guest Pro imports effortless!
-
-Send me your contacts (any format) → Get Sugar Guest Pro CSV file
+Send me your contacts → Get CSV file
 
 Type "help" for more info.`);
         }
