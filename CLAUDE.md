@@ -1,19 +1,19 @@
-# Sugar Guest Pro Contact Processor - Project Context
+# Contact Processor - Project Context
 
 ## 🎯 Current State
-**STATUS**: ✅ FULLY OPERATIONAL - Complete end-to-end Sugar Guest Pro integration  
+**STATUS**: ✅ FULLY OPERATIONAL - Simplified VCF + Text Processing Focus  
 **DEPLOYMENT**: Vercel (Production)  
-**BRANDING**: Complete Sugar Guest Pro rebrand deployed
-**LAST MAJOR UPDATE**: Comprehensive Sugar Guest Pro integration with greeting detection
+**BRANDING**: Streamlined contact processing focus
+**LAST MAJOR UPDATE**: Simplified to VCF and plain text processing only
 
 ## ✅ MAJOR RECENT ACHIEVEMENTS
 
-### 🎉 COMPLETE SYSTEM OVERHAUL (Latest)
-1. **✅ Sugar Guest Pro Branding**: Complete rebrand of all user-facing messages
-2. **✅ Greeting Detection**: Added comprehensive greeting detection (20+ patterns)
-3. **✅ File ID Validation Fix**: Resolved "Invalid file ID" errors for downloads
-4. **✅ Interactive Template Buttons**: Full WhatsApp template system working
-5. **✅ Authorized Numbers**: 6 authorized numbers for controlled access
+### 🎉 SIMPLIFIED ARCHITECTURE (Latest)
+1. **✅ VCF + Text Focus**: Removed support for CSV, Excel, PDF, DOCX formats
+2. **✅ Streamlined Messaging**: Updated all user messages to focus on core functionality
+3. **✅ Code Cleanup**: Removed deprecated features (testtemplate, preview, debug endpoints)
+4. **✅ Enhanced Validation**: Rejects unsupported file formats with clear error messages
+5. **✅ Maintained Core Features**: Greeting detection, help, test, Add More functionality preserved
 
 ### 🔧 ALL PREVIOUS ISSUES RESOLVED
 - **✅ FIXED**: Railway URL redirects - All download links now use correct Vercel domain
@@ -56,11 +56,7 @@
 
 ## 📱 Supported Contact Formats
 - ✅ **VCF Files**: iPhone/Android contact exports
-- ✅ **CSV Files**: Excel-compatible contact lists
-- ✅ **Excel Files**: .xlsx/.xls spreadsheets
-- ✅ **PDF Files**: Contact lists in PDF format
-- ✅ **Plain Text**: Natural language contact messages
-- ✅ **DOCX Files**: Word document contact lists
+- ✅ **Plain Text**: Natural language contact messages with 4 parsing methods
 
 ## 🔐 Security Measures Implemented
 - ✅ **Production-aware logging**: No sensitive data in production logs

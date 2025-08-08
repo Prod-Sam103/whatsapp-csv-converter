@@ -1,16 +1,15 @@
-# Sugar Guest Pro Contact Processor - WhatsApp Integration
+# Contact Processor - WhatsApp Integration
 
-A specialized WhatsApp bot that converts contact files and guest lists into Sugar Guest Pro-ready CSV format. Built specifically for event professionals, wedding planners, and hospitality businesses who need seamless Sugar Guest Pro integration.
+A simple WhatsApp bot that processes contact files and text to generate CSV exports. Supports VCF files and plain text contact information.
 
 ## 🚀 Features
 
 ### Core Functionality
-- **Sugar Guest Pro Integration**: Direct CSV export compatible with Sugar Guest Pro import
-- **Multi-Format Support**: VCF, CSV, Excel, PDF, Text, DOCX (6+ formats)
-- **Guest List Processing**: Extract contacts from WhatsApp messages and event guest lists
-- **Interactive Template Buttons**: Professional WhatsApp template system with Export/Download buttons
-- **Auto-Batching**: Accumulate contacts from multiple sources before Sugar Guest Pro export
-- **Event Professional Focus**: Built specifically for wedding planners and event management
+- **VCF File Support**: Process contact cards from phones
+- **Plain Text Parsing**: Extract contacts from text messages with advanced pattern recognition
+- **Interactive Template Buttons**: WhatsApp template system with Export/Download buttons
+- **Auto-Batching**: Accumulate contacts from multiple sources before CSV export
+- **Simple & Focused**: Streamlined for VCF and text processing only
 
 ### Enhanced Capabilities
 - **Greeting Detection**: Responds to 20+ greeting patterns for professional onboarding
@@ -25,13 +24,9 @@ A specialized WhatsApp bot that converts contact files and guest lists into Suga
 
 ### 1. Contact Files
 - **📇 VCF**: iPhone/Android contact cards
-- **📊 CSV**: Spreadsheet exports
-- **📗 Excel**: .xlsx/.xls files
-- **📄 PDF**: Text extraction from documents
-- **📘 DOCX**: Word document contact lists
 
 ### 2. Plain Text Messages
-Perfect for event planners and quick contact sharing:
+Perfect for quick contact sharing:
 
 ```
 John Doe +2348123456789 john@example.com

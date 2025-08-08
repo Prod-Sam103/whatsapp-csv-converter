@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-csv-converter",
   "version": "2.0.0",
-  "description": "WhatsApp to CSV Contact Converter with Excel/CSV/PDF/Text import support",
+  "description": "WhatsApp Contact Processor with VCF and Plain Text parsing support",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -13,9 +13,7 @@
     "csv",
     "contacts",
     "converter",
-    "excel",
-    "xlsx",
-    "pdf",
+    "vcf",
     "text"
   ],
   "author": "",
