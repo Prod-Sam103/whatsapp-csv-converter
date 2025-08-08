@@ -743,14 +743,14 @@ app.post('/webhook', async (req, res) => {
             
             twiml.message(`📝 **Great! You have ${contactCount} ${contactWord} ready for CSV export.**
 
-**Keep adding more guest contacts:**
-• Send contact files (VCF, CSV, Excel, PDF, DOCX)
-• Send plain text with guest details
-• Mix and match - system auto-batches everything!
+**Keep adding more contacts:**
+• Send VCF contact files
+• Send plain text with contact details
+• System auto-batches everything!
 
 **Examples:**
-• John Doe +2348123456789 john@example.com (Best Man)
-• Jane Smith: 08012345678 (Maid of Honor)
+• John Doe +2348123456789 john@example.com
+• Jane Smith: 08012345678
 
 When you're ready, type "export" to download your CSV! 📤`);
 
@@ -910,7 +910,7 @@ ${downloadUrl}
                     }
                 }
                 
-                errorMessage += `\n\n**Supported formats:**\n📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text • 📘 DOCX\n\n**Required:** Name or Phone number`;
+                errorMessage += `\n\n**Supported formats:**\n📇 VCF files • 📝 Plain Text\n\n**Required:** Name or Phone number`;
                 
                 twiml.message(errorMessage);
                 res.type('text/xml');
@@ -960,44 +960,24 @@ ${downloadUrl}
             twiml.message(`📱 **Contact Processor**
 
 📋 **HOW TO USE:**
-1. Send your contact files OR plain text guest lists
+1. Send VCF files OR paste contact text
 2. Keep sending more if needed
 3. Tap "Export" button when done
 
-Perfect for event professionals:
-• Guest list organization
-• Vendor contact management
-• Client database building
-• Wedding planning contacts
-
 📂 **Supported Formats:**
-   📇 VCF (phone contacts)
-   📊 CSV & Excel files
-   📄 PDF & Word documents
-   📝 Plain text messages & guest lists
+   📇 VCF files (phone contact exports)
+   📝 Plain text contact information
 
-⚡ **FEATURES:**
-✅ CSV file exports
-✅ Interactive Export & Download buttons
-✅ Smart duplicate detection
-✅ Professional event formatting
-
-💡 **TIPS:**
-• Send multiple files at once
-• WhatsApp sends 10 files max per message
-• Just keep sending - system auto-batches
-• Tap "Export" for CSV download
-
-📝 **Guest List Examples:**
-• John Doe +2348123456789 john@example.com (Best Man)
-• Jane Smith: 08012345678 (Maid of Honor)
-• Bob Wilson - +44 20 7946 0958 bob@company.com (Vendor)
+📝 **Text Examples:**
+• John Doe +2348123456789 john@example.com
+• Jane Smith: 08012345678
+• Bob Wilson - +44 20 7946 0958 bob@company.com
 
 🔍 **Commands:**
 • "export" - Download CSV file
 • "help" - Show this message
 
-_Ready for your guest contacts!_`);
+_Ready for your contacts!_`);
             
         } else if (Body && isGreeting(Body)) {
             // Greeting detection - trigger welcome message
@@ -1126,7 +1106,7 @@ _Ready for contact processing!_`);
                     
                 } else {
                     // No contacts found, but be helpful
-                    twiml.message(`📝 **No guest contacts detected in your message.**\n\n**Examples of supported formats for event planning:**\n• John Doe +2348123456789 john@example.com (Best Man)\n• Jane Smith: 08012345678 (Maid of Honor)\n• Bob Wilson - +44 20 7946 0958 bob@company.com (Vendor)\n\n**Or send guest list files directly!**\n\nType "help" for event planning tips.`);
+                    twiml.message(`📝 **No contacts detected in your message.**\n\n**Examples of supported formats:**\n• John Doe +2348123456789 john@example.com\n• Jane Smith: 08012345678\n• Bob Wilson - +44 20 7946 0958 bob@company.com\n\n**Or send VCF files directly!**\n\nType "help" for more info.`);
                 }
                 
             } catch (textError) {
@@ -1580,7 +1560,7 @@ app.listen(PORT, () => {
     console.log('   📁 Large file support: up to 20MB');
     console.log('   🔄 Enhanced error handling and recovery');
     console.log('   ✅ Enhanced validation: accepts name OR phone OR email');
-    console.log('   📁 Supported: VCF, CSV, Excel, PDF, Text, DOCX');
+    console.log('   📁 Supported: VCF, Plain Text');
     console.log('\n📋 Dual template webhook ready at: POST /webhook');
     console.log('💡 Professional UX: Status template → Download template!');
 });
