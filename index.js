@@ -393,10 +393,10 @@ async function parseContactMediaScalable(mediaUrl, req) {
             console.log(`📄 Detected filename: ${filename}`);
         }
         
-        // Enhanced file type detection
+        // Simplified file type detection - VCF and text only
         let detectedType = contentType;
         
-        // Override content type based on filename extension for better accuracy
+        // Override content type based on filename extension
         if (filename) {
             if (filename.endsWith('.txt')) {
                 detectedType = 'text/plain';
@@ -404,24 +404,10 @@ async function parseContactMediaScalable(mediaUrl, req) {
             } else if (filename.endsWith('.vcf')) {
                 detectedType = 'text/vcard';
                 console.log('🔍 Filename override: Detected as text/vcard');
-            } else if (filename.endsWith('.csv')) {
-                detectedType = 'text/csv';
-                console.log('🔍 Filename override: Detected as text/csv');
-            } else if (filename.endsWith('.xlsx')) {
-                detectedType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-                console.log('🔍 Filename override: Detected as Excel');
-            } else if (filename.endsWith('.xls')) {
-                detectedType = 'application/vnd.ms-excel';
-                console.log('🔍 Filename override: Detected as Excel (legacy)');
-            } else if (filename.endsWith('.docx')) {
-                detectedType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-                console.log('🔍 Filename override: Detected as DOCX');
-            } else if (filename.endsWith('.doc')) {
-                detectedType = 'application/msword';
-                console.log('🔍 Filename override: Detected as DOC');
-            } else if (filename.endsWith('.pdf')) {
-                detectedType = 'application/pdf';
-                console.log('🔍 Filename override: Detected as PDF');
+            } else if (filename.endsWith('.csv') || filename.endsWith('.xlsx') || 
+                       filename.endsWith('.xls') || filename.endsWith('.docx') || 
+                       filename.endsWith('.doc') || filename.endsWith('.pdf')) {
+                throw new Error('Unsupported file format. Please send VCF files or paste contact text.');
             }
         }
         
@@ -434,19 +420,11 @@ async function parseContactMediaScalable(mediaUrl, req) {
                 detectedType = 'text/vcard';
                 console.log('🔍 Content analysis: Detected VCF content');
             } else if (textContent.includes('PK') && textContent.includes('[Content_Types]')) {
-                if (filename.includes('docx') || !filename.includes('xlsx')) {
-                    detectedType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-                    console.log('🔍 Content analysis: Detected DOCX content');
-                } else {
-                    detectedType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-                    console.log('🔍 Content analysis: Detected XLSX content');
-                }
+                throw new Error('Excel/Word files not supported. Please send VCF files or paste contact text.');
             } else if (textContent.includes('%PDF')) {
-                detectedType = 'application/pdf';
-                console.log('🔍 Content analysis: Detected PDF content');
+                throw new Error('PDF files not supported. Please send VCF files or paste contact text.');
             } else if (textContent.includes(',') && (textContent.includes('name') || textContent.includes('phone') || textContent.includes('email'))) {
-                detectedType = 'text/csv';
-                console.log('🔍 Content analysis: Detected CSV content');
+                throw new Error('CSV files not supported. Please send VCF files or paste contact text.');
             } else {
                 // Default to text if we can't determine
                 detectedType = 'text/plain';
@@ -825,13 +803,13 @@ When you're ready, type "export" to download your Sugar Guest Pro CSV! 📤`);
                 console.error('❌ Download template failed, using TwiML fallback:', downloadError);
                 
                 const downloadUrl = `${BASE_URL}/get/${fileId}`;
-                twiml.message(`✅ **Your Sugar Guest Pro CSV file with ${contacts.length} contacts is ready!**
+                twiml.message(`✅ **Your CSV file with ${contacts.length} contacts is ready!**
 
-📎 *Download Sugar Guest Pro CSV*
+📎 *Download CSV*
 ${downloadUrl}
 
 ⏰ _Link expires in 2 hours_
-💡 _Perfect for importing into Sugar Guest Pro!_`);
+💡 _Ready for import!_`);
             }
             
             // Batch is already cleared by popContacts()
@@ -1065,59 +1043,13 @@ Type "help" for more info.`);
 🗃️ Active Files: ${fileCount}
 
 **Supported Formats:**
-📇 VCF • 📊 CSV • 📗 Excel • 📄 PDF • 📝 Text • 📘 DOCX
+📇 VCF • 📝 Plain Text
 
-_Ready for professional event management!_`);
+_Ready for contact processing!_`);
             
-        } else if (Body && Body.toLowerCase() === 'testtemplate') {
-            console.log(`🌟 TESTTEMPLATE BRANCH TRIGGERED for ${From}`);
-            // Test both templates
-            try {
-                const testFileId = 'test-' + Date.now();
-                const testBatch = { count: 42, filesProcessed: 3, contacts: [] };
-                
-                console.log('🧪 Testing Status Template...');
-                await sendStatusTemplateWithExportButton(From, testBatch);
-                
-                console.log('🧪 Testing Download Template...');
-                await sendDownloadTemplateMessage(From, 42, testFileId);
-                
-                twiml.message('✅ Both templates tested! Check above for Export and Download buttons.');
-            } catch (error) {
-                twiml.message(`❌ Template test failed: ${error.message}`);
-            }
+        // testtemplate command removed - feature deprecated
             
-        } else if (Body && Body.toLowerCase() === 'preview' || 
-                   ButtonPayload === 'preview_contacts' ||
-                   ButtonText === '👁️ Preview All') {
-            // PREVIEW BATCH CONTENTS using session store
-            console.log(`🌟 PREVIEW BRANCH TRIGGERED for ${From}`);
-            const cleanPhone = From.replace('whatsapp:', '');
-            const contacts = await store.get(`contacts:${cleanPhone}`) || [];
-            
-            if (contacts.length === 0) {
-                twiml.message(`📝 **No guest contacts in your batch yet.**\n\nSend guest list files, contact files, or plain text messages with guest details to get started with Sugar Guest Pro!`);
-            } else {
-                let previewMessage = `📋 **Batch Preview (${contacts.length} contacts):**\n\n`;
-                
-                // Show all contacts (limit to 20 for WhatsApp message limits)
-                const contactsToShow = contacts.slice(0, 20);
-                contactsToShow.forEach((contact, index) => {
-                    previewMessage += `${index + 1}. **${contact.name || 'Contact'}**\n`;
-                    if (contact.mobile) previewMessage += `   📱 ${contact.mobile}\n`;
-                    if (contact.email) previewMessage += `   📧 ${contact.email}\n`;
-                    previewMessage += `\n`;
-                });
-                
-                if (contacts.length > 20) {
-                    previewMessage += `... and ${contacts.length - 20} more contacts\n\n`;
-                }
-                
-                previewMessage += `📤 Type "export" to download CSV\n`;
-                previewMessage += `➕ Send more contacts to add them`;
-                
-                twiml.message(previewMessage);
-            }
+        // preview command removed - feature deprecated
             
         } else if (Body && Body.trim() && (NumMedia === 0 || NumMedia === '0')) {
             // PLAIN TEXT CONTACT EXTRACTION
@@ -1128,7 +1060,7 @@ _Ready for professional event management!_`);
             // SECURITY: Validate and sanitize input
             const sanitizedBody = validateAndSanitizeTextInput(Body);
             if (!sanitizedBody) {
-                twiml.message(`❌ **Invalid guest information detected.**\n\nPlease send valid contact information, guest lists, or contact files for Sugar Guest Pro processing.`);
+                twiml.message(`❌ **Invalid contact information detected.**\n\nPlease send valid contact information or VCF files.`);
                 res.type('text/xml');
                 res.send(twiml.toString());
                 return;
@@ -1469,7 +1401,7 @@ app.get('/', async (req, res) => {
         <!DOCTYPE html>
         <html>
         <head>
-            <title>WhatsApp CSV Converter - Dual Template Edition</title>
+            <title>WhatsApp Contact Processor - VCF & Text Edition</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 body {
@@ -1499,7 +1431,7 @@ app.get('/', async (req, res) => {
         </head>
         <body>
             <div class="container">
-                <h1>🚀 WhatsApp CSV Converter - Dual Template Edition</h1>
+                <h1>📱 WhatsApp Contact Processor - VCF & Text Edition</h1>
                 <h2>Status: ✅ OPERATIONAL</h2>
                 
                 <div class="status templates">
@@ -1537,14 +1469,10 @@ app.get('/', async (req, res) => {
                     <div class="metric"><span>Environment:</span><strong>${IS_PRODUCTION ? 'Production' : 'Development'}</strong></div>
                 </div>
                 
-                <h3>📂 Supported Formats (6 Total)</h3>
+                <h3>📂 Supported Formats (2 Total)</h3>
                 <ul>
-                    <li>📇 <strong>VCF</strong> - Contact cards (optimised parsing)</li>
-                    <li>📊 <strong>CSV</strong> - Spreadsheet data (enhanced detection)</li>
-                    <li>📗 <strong>Excel</strong> - .xlsx/.xls files (streaming support)</li>
-                    <li>📄 <strong>PDF</strong> - Text extraction (memory efficient)</li>
-                    <li>📝 <strong>Text</strong> - Pattern matching (4 methods)</li>
-                    <li>📘 <strong>DOCX</strong> - Word documents (enhanced support)</li>
+                    <li>📇 <strong>VCF</strong> - Contact cards (optimized parsing)</li>
+                    <li>📝 <strong>Plain Text</strong> - Contact information parsing (4 methods)</li>
                 </ul>
                 
                 <h3>📋 Dual Template Configuration</h3>
@@ -1701,58 +1629,7 @@ process.on('SIGTERM', async () => {
     process.exit(0);
 });
 
-// Debug endpoints for troubleshooting
-app.get('/test-store', async (req, res) => {
-    const testPhone = '1234567890';
-    const testContacts = [
-        { name: 'Test User', mobile: '+1234567890', email: 'test@example.com' }
-    ];
-    
-    try {
-        console.log('🧪 TEST-STORE: Starting store test');
-        
-        // Test store operations
-        const count = await store.appendContacts(testPhone, testContacts);
-        console.log('🧪 TEST-STORE: Append result:', count);
-        
-        const retrieved = await store.get(`contacts:${testPhone}`);
-        console.log('🧪 TEST-STORE: Retrieved:', retrieved?.length || 0);
-        
-        const popped = await store.popContacts(testPhone);
-        console.log('🧪 TEST-STORE: Popped:', popped?.length || 0);
-        
-        res.json({
-            success: true,
-            appendResult: count,
-            retrievedCount: retrieved?.length || 0,
-            poppedCount: popped?.length || 0,
-            storageType: store.redis ? 'Redis' : 'Memory',
-            redisConnected: !!store.redis
-        });
-    } catch (error) {
-        console.log('🧪 TEST-STORE: Error:', error);
-        res.json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-// Debug endpoint to show current storage state
-app.get('/debug-storage/:phone', async (req, res) => {
-    const phone = req.params.phone.replace('whatsapp:', '');
-    try {
-        const contacts = await store.get(`contacts:${phone}`);
-        res.json({
-            phone: phone,
-            contactCount: contacts?.length || 0,
-            contacts: contacts || [],
-            storageType: store.redis ? 'Redis' : 'Memory'
-        });
-    } catch (error) {
-        res.json({ error: error.message });
-    }
-});
+// Debug endpoints removed - features deprecated
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {

@@ -1,5 +1,5 @@
-// src/csv-excel-parser.js - Universal Contact File Parser V2
-// Enhanced with multi-format support and improved text parsing
+// src/csv-excel-parser.js - Simplified Contact Parser
+// Supports VCF files and plain text contact parsing only
 
 // Production-aware logging
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
@@ -17,7 +17,7 @@ const logError = (...args) => {
     }
 };
 
-// Main parsing function - routes to appropriate parser based on content type
+// Main parsing function - supports VCF files and plain text only
 async function parseContactFile(fileContent, mediaType = '') {
     try {
         log(`🔍 Processing file type: ${mediaType}`);
@@ -29,7 +29,7 @@ async function parseContactFile(fileContent, mediaType = '') {
             content = fileContent.toString('utf8');
         }
         
-        // VCF files - highest priority detection
+        // VCF files - primary format
         if (mediaType.includes('vcard') || mediaType.includes('text/x-vcard') || 
             content.includes('BEGIN:VCARD')) {
             log('📇 Parsing as VCF format');
@@ -37,36 +37,22 @@ async function parseContactFile(fileContent, mediaType = '') {
             return parseVCF(content);
         }
         
-        // CSV files
-        if (mediaType.includes('csv') || mediaType.includes('application/csv') ||
-            (content.includes(',') && (content.toLowerCase().includes('name') || 
-             content.toLowerCase().includes('phone') || content.toLowerCase().includes('email')))) {
-            log('📊 Parsing as CSV format');
-            return parseCSV(content);
-        }
-        
-        // Excel files
-        if (mediaType.includes('excel') || mediaType.includes('spreadsheet') || 
-            mediaType.includes('vnd.ms-excel') || mediaType.includes('officedocument.spreadsheetml')) {
-            log('📗 Parsing as Excel format');
-            return parseExcel(fileContent); // Pass original buffer for Excel
-        }
-        
-        // PDF files
-        if (mediaType.includes('pdf')) {
-            log('📄 Parsing as PDF format');
-            return await parsePDF(fileContent); // Pass original buffer for PDF
-        }
-        
-        // Text files - ENHANCED VERSION
+        // Text files - plain text contact parsing
         if (mediaType.includes('text/plain') || mediaType.includes('text/') || 
             (!mediaType && typeof content === 'string')) {
-            log('📝 Parsing as Text format');
+            log('📝 Parsing as plain text contacts');
             return parseTextContacts(content);
         }
         
+        // Reject unsupported formats
+        if (mediaType.includes('csv') || mediaType.includes('excel') || 
+            mediaType.includes('pdf') || mediaType.includes('spreadsheet') ||
+            mediaType.includes('vnd.ms-excel') || mediaType.includes('officedocument')) {
+            throw new Error('Unsupported file format. Please send VCF files or paste contact text.');
+        }
+        
         // Auto-detection for unknown formats
-        log('🔄 Unknown format, attempting intelligent detection...');
+        log('🔄 Unknown format, attempting detection...');
         
         // Check for VCF patterns
         if (content.includes('BEGIN:VCARD') || content.includes('VCARD')) {
@@ -75,28 +61,27 @@ async function parseContactFile(fileContent, mediaType = '') {
             return parseVCF(content);
         }
         
-        // Check for CSV patterns
-        if (content.includes(',') && (content.includes('@') || content.match(/\d{3,}/))) {
-            log('🔍 Auto-detected CSV content');
-            return parseCSV(content);
-        }
-        
-        // Fallback to text parsing for everything else
-        log('🔍 Fallback to enhanced text parsing');
+        // Fallback to text parsing
+        log('🔍 Fallback to text parsing');
         return parseTextContacts(content);
         
     } catch (error) {
         logError('❌ Parse error:', error);
         
-        // Final fallback to text parsing
-        try {
-            const textContent = Buffer.isBuffer(fileContent) ? fileContent.toString('utf8') : fileContent;
-            log('🆘 Emergency text parsing fallback...');
-            return parseTextContacts(textContent);
-        } catch (finalError) {
-            logError('💥 All parsing methods failed:', finalError);
-            return [];
+        // Only attempt text parsing fallback for supported formats
+        if (!error.message.includes('Unsupported file format')) {
+            try {
+                const textContent = Buffer.isBuffer(fileContent) ? fileContent.toString('utf8') : fileContent;
+                log('🆘 Text parsing fallback...');
+                return parseTextContacts(textContent);
+            } catch (finalError) {
+                logError('💥 Text parsing failed:', finalError);
+                return [];
+            }
         }
+        
+        // Re-throw unsupported format errors
+        throw error;
     }
 }
 
@@ -301,297 +286,33 @@ function cleanPhoneNumber(phone) {
     return clean;
 }
 
-// CSV parsing function
-function parseCSV(csvContent) {
-    const contacts = [];
-    
-    try {
-        log('📊 Starting CSV parsing...');
-        const lines = csvContent.split('\n').filter(line => line.trim());
-        
-        if (lines.length < 2) {
-            log('📊 CSV too short, no data rows found');
-            return contacts;
-        }
-        
-        // Parse headers intelligently
-        const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase().replace(/"/g, ''));
-        log('📊 CSV headers detected:', headers);
-        
-        // Find column indices intelligently
-        const nameIndex = headers.findIndex(h => 
-            h.includes('name') || h.includes('contact') || h.includes('person') || h.includes('full')
-        );
-        const phoneIndex = headers.findIndex(h => 
-            h.includes('phone') || h.includes('mobile') || h.includes('number') || h.includes('tel') || h.includes('cell')
-        );
-        const emailIndex = headers.findIndex(h => 
-            h.includes('email') || h.includes('mail') || h.includes('@')
-        );
-        
-        log(`📊 Column mapping: name=${nameIndex}, phone=${phoneIndex}, email=${emailIndex}`);
-        
-        // Parse data rows
-        for (let i = 1; i < lines.length; i++) {
-            try {
-                const values = parseCSVLine(lines[i]);
-                
-                const contact = {
-                    name: nameIndex >= 0 && values[nameIndex] ? values[nameIndex].trim() : '',
-                    mobile: phoneIndex >= 0 && values[phoneIndex] ? cleanPhoneNumber(values[phoneIndex].trim()) : '',
-                    email: emailIndex >= 0 && values[emailIndex] ? values[emailIndex].trim() : '',
-                    passes: 1
-                };
-                
-                // Only add if we have meaningful data
-                if (contact.name || contact.mobile) {
-                    contacts.push(contact);
-                }
-            } catch (rowError) {
-                logError(`📊 Error parsing CSV row ${i}:`, rowError);
-                continue;
-            }
-        }
-        
-        log(`📊 CSV parsed successfully: ${contacts.length} contacts extracted`);
-        return contacts;
-        
-    } catch (error) {
-        logError('📊 CSV parsing failed:', error);
-        return [];
-    }
-}
+// CSV parsing removed - only VCF and text parsing supported
 
-// Helper to properly parse CSV lines with quotes and commas
-function parseCSVLine(line) {
-    const values = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        const nextChar = line[i + 1];
-        
-        if (char === '"') {
-            if (inQuotes && nextChar === '"') {
-                // Escaped quote
-                current += '"';
-                i++; // Skip next quote
-            } else {
-                // Toggle quote state
-                inQuotes = !inQuotes;
-            }
-        } else if (char === ',' && !inQuotes) {
-            // End of field
-            values.push(current);
-            current = '';
-        } else {
-            current += char;
-        }
-    }
-    
-    // Add final field
-    values.push(current);
-    
-    return values.map(v => v.trim());
-}
+// CSV parsing functions removed - only VCF and text parsing supported
 
-// Excel parsing function (requires xlsx package)
-function parseExcel(excelBuffer) {
-    try {
-        log('📗 Starting Excel parsing...');
-        
-        // SECURITY: Input validation and size limits
-        if (!Buffer.isBuffer(excelBuffer)) {
-            throw new Error('Invalid Excel buffer provided');
-        }
-        
-        const bufferSize = excelBuffer.length;
-        const MAX_EXCEL_SIZE = 20 * 1024 * 1024; // 20MB limit
-        
-        if (bufferSize > MAX_EXCEL_SIZE) {
-            throw new Error(`Excel file too large: ${Math.round(bufferSize / 1024 / 1024)}MB (max: 20MB)`);
-        }
-        
-        log(`📗 Excel buffer size: ${Math.round(bufferSize / 1024)}KB`);
-        
-        const XLSX = require('xlsx');
-        
-        // SECURITY: Safe reading with limited options to prevent prototype pollution
-        const workbook = XLSX.read(excelBuffer, { 
-            type: 'buffer',
-            cellText: false,      // Disable cell text processing to reduce attack surface
-            cellFormula: false,   // Disable formula processing for security
-            cellHTML: false,      // Disable HTML processing
-            sheetRows: 1000,      // Limit rows to prevent DoS
-            bookSheets: true,     // Only process actual sheets
-            bookProps: false,     // Disable book properties to reduce attack surface
-            cellDates: false      // Disable date processing
-        });
-        
-        // SECURITY: Validate workbook structure
-        if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
-            throw new Error('Invalid or empty Excel workbook');
-        }
-        
-        // SECURITY: Limit number of sheets to process (prevent DoS)
-        const MAX_SHEETS = 5;
-        if (workbook.SheetNames.length > MAX_SHEETS) {
-            log(`📗 Limiting to first ${MAX_SHEETS} sheets (found ${workbook.SheetNames.length})`);
-            workbook.SheetNames = workbook.SheetNames.slice(0, MAX_SHEETS);
-        }
-        
-        // Get first worksheet
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        
-        // SECURITY: Validate worksheet
-        if (!worksheet) {
-            throw new Error(`Worksheet '${sheetName}' not found or invalid`);
-        }
-        
-        log(`📗 Reading sheet: ${sheetName}`);
-        
-        // SECURITY: Convert to JSON with safe options
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
-            header: 1,
-            raw: false,           // Convert all values to strings for safety
-            defval: '',           // Default value for empty cells
-            range: undefined      // Use default range (prevents range manipulation attacks)
-        });
-        
-        if (jsonData.length < 2) {
-            log('📗 Excel sheet too short, no data rows found');
-            return [];
-        }
-        
-        // Parse headers (first row)
-        const headers = jsonData[0].map(h => (h || '').toString().toLowerCase().trim());
-        log('📗 Excel headers detected:', headers);
-        
-        // Find column indices
-        const nameIndex = headers.findIndex(h => 
-            h.includes('name') || h.includes('contact') || h.includes('person') || h.includes('full')
-        );
-        const phoneIndex = headers.findIndex(h => 
-            h.includes('phone') || h.includes('mobile') || h.includes('number') || h.includes('tel') || h.includes('cell')
-        );
-        const emailIndex = headers.findIndex(h => 
-            h.includes('email') || h.includes('mail') || h.includes('@')
-        );
-        
-        log(`📗 Column mapping: name=${nameIndex}, phone=${phoneIndex}, email=${emailIndex}`);
-        
-        const contacts = [];
-        
-        // Parse data rows
-        for (let i = 1; i < jsonData.length; i++) {
-            const row = jsonData[i];
-            
-            if (!row || row.length === 0) continue;
-            
-            try {
-                const contact = {
-                    name: nameIndex >= 0 && row[nameIndex] ? row[nameIndex].toString().trim() : '',
-                    mobile: phoneIndex >= 0 && row[phoneIndex] ? cleanPhoneNumber(row[phoneIndex].toString().trim()) : '',
-                    email: emailIndex >= 0 && row[emailIndex] ? row[emailIndex].toString().trim() : '',
-                    passes: 1
-                };
-                
-                // Only add if we have meaningful data
-                if (contact.name || contact.mobile) {
-                    contacts.push(contact);
-                }
-            } catch (rowError) {
-                logError(`📗 Error parsing Excel row ${i}:`, rowError);
-                continue;
-            }
-        }
-        
-        log(`📗 Excel parsed successfully: ${contacts.length} contacts extracted`);
-        return contacts;
-        
-    } catch (error) {
-        logError('📗 Excel parsing failed:', error);
-        
-        // Try to extract as CSV if Excel parsing fails
-        try {
-            log('📗 Attempting CSV fallback...');
-            return parseCSV(excelBuffer.toString());
-        } catch (csvError) {
-            logError('📗 CSV fallback also failed:', csvError);
-            return [];
-        }
-    }
-}
+// Excel parsing removed - only VCF and text parsing supported
 
-// PDF parsing function (requires pdf-parse package)
-async function parsePDF(pdfBuffer) {
-    try {
-        log('📄 Starting PDF parsing...');
-        const pdf = require('pdf-parse');
-        
-        // Extract text from PDF
-        const data = await pdf(pdfBuffer);
-        const textContent = data.text;
-        
-        log(`📄 PDF text extracted: ${textContent.length} characters`);
-        
-        if (!textContent || textContent.trim().length === 0) {
-            log('📄 No text content found in PDF');
-            return [];
-        }
-        
-        // Use the enhanced text parser to extract contacts from PDF content
-        const extractedContacts = parseTextContacts(textContent);
-        
-        log(`📄 PDF parsed successfully: ${extractedContacts.length} contacts extracted`);
-        return extractedContacts;
-        
-    } catch (error) {
-        logError('📄 PDF parsing failed:', error);
-        
-        // Fallback: try to parse as text if it's actually a text file
-        try {
-            log('📄 Attempting text fallback...');
-            return parseTextContacts(pdfBuffer.toString());
-        } catch (textError) {
-            logError('📄 Text fallback failed:', textError);
-            return [];
-        }
-    }
-}
+// PDF parsing removed - only VCF and text parsing supported
 
 // Get supported formats for help messages
 function getSupportedFormats() {
     return {
         formats: [
             { name: 'VCF', description: 'Contact cards from phones', extensions: ['.vcf'] },
-            { name: 'CSV', description: 'Comma-separated values', extensions: ['.csv'] },
-            { name: 'Excel', description: 'Spreadsheet formats', extensions: ['.xlsx', '.xls'] },
-            { name: 'PDF', description: 'Text extraction from documents', extensions: ['.pdf'] },
-            { name: 'Text', description: 'Pattern matching for contact data', extensions: ['.txt'] }
+            { name: 'Text', description: 'Plain text with contact information', extensions: ['.txt'] }
         ],
         mimeTypes: [
             'text/vcard',
             'text/x-vcard',
-            'text/csv',
-            'application/csv',
-            'application/vnd.ms-excel',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'application/pdf',
             'text/plain'
         ]
     };
 }
 
-// Export all functions
+// Export functions
 module.exports = {
     parseContactFile,
     parseTextContacts,
-    parseCSV,
-    parseExcel,
-    parsePDF,
     getSupportedFormats,
     cleanPhoneNumber,
     cleanText
