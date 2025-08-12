@@ -17,7 +17,7 @@ A simple WhatsApp bot that processes contact files and text to generate CSV expo
 - **Scalable Storage**: Redis with chunking for large datasets
 - **Smart Detection**: Intelligent file type recognition and fallback parsing
 - **International Phone Formatting**: Automatic formatting for global events
-- **Authorized Access**: Controlled access with authorized phone numbers
+- **Public Access**: Now available to everyone worldwide
 - **Secure Downloads**: Time-limited download links with 2-hour expiry
 
 ## 📱 Supported Input Formats
@@ -238,12 +238,12 @@ parseContactFile(testText, 'text/plain').then(contacts => {
 
 ## 🔒 Security Features
 
-- **Rate Limiting**: 5 requests per IP per 15 minutes
+- **Rate Limiting**: 20 requests per IP per 15 minutes (enhanced for public access)
 - **File Size Limits**: 20MB maximum per file
 - **Processing Timeouts**: 25-second limit to prevent hangs
 - **Secure Downloads**: Time-limited links with 2-hour expiry
 - **Input Validation**: Comprehensive data sanitization
-- **Authorized Numbers**: Testing mode restriction
+- **Public Access**: Available to all WhatsApp users globally
 
 ## 📊 Performance Optimizations
 
@@ -270,7 +270,7 @@ parseContactFile(testText, 'text/plain').then(contacts => {
 **WhatsApp not responding?**
 - Verify webhook URL is correct and accessible
 - Check Twilio credentials and phone number
-- Ensure authorized number for testing mode
+- Service now available to all users globally
 
 ### Debug Mode
 Set `NODE_ENV=development` for detailed logging:

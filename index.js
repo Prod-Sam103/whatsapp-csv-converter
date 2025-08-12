@@ -24,7 +24,7 @@ function rateLimit(req, res, next) {
     
     const now = Date.now();
     const windowMs = 15 * 60 * 1000; // 15 minutes
-    const maxRequests = 100; // 100 requests per window
+    const maxRequests = 20; // Reduced from 100 to 20 for public access security
     
     // Clean old entries
     for (const [key, data] of rateLimitStore.entries()) {
@@ -79,15 +79,9 @@ const CHUNK_SIZE = 50; // Process contacts in chunks
 const WHATSAPP_MEDIA_LIMIT = 10; // WhatsApp/Twilio limit per message
 const BATCH_TIMEOUT = 20 * 60; // 20 minutes batch timeout
 
-// TESTING RESTRICTION - Authorized numbers
-const AUTHORIZED_NUMBERS = [
-    '+2348121364213', // Your personal number
-    '+2347061240799',  // New authorized number
-    '+2347034988523', // New authorized number
-    '+2349065729552', // New authorized number
-    '+2348132474537', // New authorized number
-    '+2348066196638'  // Additional authorized number
-];
+// OPEN ACCESS - No phone number restrictions (removed for public access)
+// Previously restricted to specific numbers, now open to all users
+const AUTHORIZED_NUMBERS = []; // Empty array - no restrictions
 
 // Template Configuration - TWO TEMPLATES
 const STATUS_TEMPLATE_SID = process.env.STATUS_TEMPLATE_SID; // New: Status with Export button
@@ -230,10 +224,10 @@ const storage = {
     }
 };
 
-// Check if number is authorized for testing
+// Public access - all numbers are now authorized
 function isAuthorizedNumber(phoneNumber) {
-    const cleanNumber = phoneNumber.replace('whatsapp:', '');
-    return AUTHORIZED_NUMBERS.includes(cleanNumber);
+    // Always return true for public access (no restrictions)
+    return true;
 }
 
 // SECURITY: Input validation and sanitization function
@@ -550,7 +544,7 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
     // Initialize Twilio client
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
-    const fromNumber = '+16466030424';
+    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || '+14155238886';
     
     // Build contact preview for {{2}} variable
     const firstContact = contacts[0];
@@ -589,7 +583,7 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
 // Template 1: Status Message with Export Button
 async function sendStatusTemplateWithExportButton(to, batch) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    const fromNumber = '+16466030424';
+    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || '+14155238886';
     const remaining = MAX_CONTACTS_PER_BATCH - batch.count;
     
     console.log(`🚀 Sending status template with Export button - Count: ${batch.count}, Files: ${batch.filesProcessed}, Remaining: ${remaining}`);
@@ -650,7 +644,7 @@ async function sendStatusTemplateWithExportButton(to, batch) {
 // Template 2: Download CSV Button
 async function sendDownloadTemplateMessage(to, contactCount, fileId) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    const fromNumber = '+16466030424';
+    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || '+14155238886';
     
     const cleanFileId = typeof fileId === 'string' ? fileId.split('/').pop() : fileId;
     console.log(`🚀 Sending download template - FileID: ${cleanFileId}, Count: ${contactCount}`);
@@ -722,13 +716,8 @@ app.post('/webhook', async (req, res) => {
     const twiml = new twilio.twiml.MessagingResponse();
     
     try {
-        // TESTING RESTRICTION CHECK
-        if (!isAuthorizedNumber(From)) {
-            console.log(`🚫 Unauthorized number: ${From}`);
-            res.type('text/xml');
-            res.send(twiml.toString());
-            return;
-        }
+        // PUBLIC ACCESS - All users now welcome (authorization removed for public use)
+        // Previous authorization check removed - service now available to everyone
         
         // Handle Add More button - encourage sending more contacts
         if (ButtonPayload === 'add_more_contacts' || 
@@ -1431,7 +1420,7 @@ app.get('/', async (req, res) => {
                 
                 <div class="status">
                     <h3>🎯 System Status</h3>
-                    <div class="metric"><span>Authorized Users:</span><strong>${AUTHORIZED_NUMBERS.length} numbers</strong></div>
+                    <div class="metric"><span>Access Policy:</span><strong class="green">✅ Public Access (All Users Welcome)</strong></div>
                     <div class="metric"><span>Storage Backend:</span><strong>${redisClient ? 'Redis Cloud (Optimised)' : 'In-Memory'}</strong></div>
                     <div class="metric"><span>Active Files:</span><strong>${fileCount}</strong></div>
                     <div class="metric"><span>Environment:</span><strong>${IS_PRODUCTION ? 'Production' : 'Development'}</strong></div>
@@ -1540,13 +1529,8 @@ app.listen(PORT, () => {
     console.log(`🔧 Environment: ${IS_PRODUCTION ? 'PRODUCTION' : 'DEVELOPMENT'}`);
     console.log(`💾 Storage: ${redisClient ? 'Redis Connected (Optimised)' : 'In-Memory Mode'}`);
     console.log(`🌐 Base URL: ${BASE_URL}`);
-    console.log(`👥 Authorized Numbers: ${AUTHORIZED_NUMBERS.length}`);
-    console.log('   - +2348121364213 (Primary)');
-    console.log('   - +2347061240799 (Secondary)');
-    console.log('   - +2347034988523 (Tertiary)');
-    console.log('   - +2349065729552 (Quaternary)');
-    console.log('   - +2348132474537 (Quinary)');
-    console.log('   - +2348066196638 (Senary)');
+    console.log(`🌍 Access Policy: PUBLIC ACCESS - All users welcome!`);
+    console.log(`🔒 Security: Enhanced rate limiting (20 req/15min) for public use`);
     console.log('\n📋 TEMPLATE CONFIGURATION:');
     console.log(`   📤 Status Template SID: ${STATUS_TEMPLATE_SID || 'NOT CONFIGURED'}`);
     console.log(`   📥 Download Template SID: ${DOWNLOAD_TEMPLATE_SID || 'NOT CONFIGURED'}`);

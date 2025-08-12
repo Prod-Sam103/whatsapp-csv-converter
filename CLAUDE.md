@@ -41,7 +41,7 @@
 - **Templates**: Dual template system (Status + Download) - WORKING
 - **Buttons**: Interactive WhatsApp template buttons - WORKING
 - **Greeting Detection**: 20+ greeting patterns trigger welcome message
-- **Authorization**: 6 authorized numbers with access control
+- **Public Access**: Service opened to all WhatsApp users worldwide
 
 ## 🔍 Debugging Infrastructure
 
