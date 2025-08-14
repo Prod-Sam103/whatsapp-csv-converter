@@ -753,9 +753,9 @@ When you're ready, type "export" to download your CSV! 📤`);
             console.log(`🌟 EXPORT BRANCH TRIGGERED for ${From}`);
             console.log(`📤 Export triggered via: ${ButtonText || ButtonPayload || Body}`);
             
-            // Use session store to get and clear contacts
+            // Use session store to get contacts (non-destructive first)
             const cleanPhone = From.replace('whatsapp:', '');
-            const contacts = await store.popContacts(cleanPhone);
+            const contacts = await store.get(`contacts:${cleanPhone}`);
             
             if (!contacts || contacts.length === 0) {
                 twiml.message(`❌ No contacts to export.\n\nSend some VCF files or contact information first!`);
@@ -801,7 +801,9 @@ ${downloadUrl}
 💡 _Ready for import!_`);
             }
             
-            // Batch is already cleared by popContacts()
+            // Clear contacts only after successful export
+            await store.del(`contacts:${cleanPhone}`);
+            console.log(`🗑️ Cleared contact batch for ${cleanPhone} after successful export`);
             
         } else if (NumMedia > 0) {
             // AUTO-BATCH CONTACT PROCESSING
