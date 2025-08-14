@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-csv-converter",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "WhatsApp Contact Processor with VCF and Plain Text parsing support",
   "main": "index.js",
   "scripts": {
@@ -24,7 +24,7 @@
     "express": "^4.19.2",
     "papaparse": "^5.5.3",
     "pdf-parse": "^1.1.1",
-    "redis": "^4.6.7",
+    "redis": "^4.7.1",
     "twilio": "^5.2.0",
     "uuid": "^9.0.0",
     "xlsx": "^0.18.5"

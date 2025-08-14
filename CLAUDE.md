@@ -4,11 +4,18 @@
 **STATUS**: ✅ FULLY OPERATIONAL - Simplified VCF + Text Processing Focus  
 **DEPLOYMENT**: Vercel (Production)  
 **BRANDING**: Streamlined contact processing focus
-**LAST MAJOR UPDATE**: Simplified to VCF and plain text processing only
+**LAST MAJOR UPDATE**: Fixed export button consistency bug
 
 ## ✅ MAJOR RECENT ACHIEVEMENTS
 
-### 🎉 SIMPLIFIED ARCHITECTURE (Latest)
+### 🐛 EXPORT BUTTON BUG FIX (Latest - August 2024)
+1. **✅ Fixed Inconsistent Export**: Button clicks and text commands now work consistently  
+2. **✅ Non-Destructive Retrieval**: Changed from popContacts() to get() for button interactions
+3. **✅ Proper Cleanup**: Contacts only cleared after successful CSV generation
+4. **✅ Multiple Button Clicks**: Users can tap Export button multiple times without errors
+5. **✅ Unified Logic**: Both "Export CSV" button and "export" command use same code path
+
+### 🎉 SIMPLIFIED ARCHITECTURE (Previous)
 1. **✅ VCF + Text Focus**: Removed support for CSV, Excel, PDF, DOCX formats
 2. **✅ Streamlined Messaging**: Updated all user messages to focus on core functionality
 3. **✅ Code Cleanup**: Removed deprecated features (testtemplate, preview, debug endpoints)
@@ -16,6 +23,7 @@
 5. **✅ Maintained Core Features**: Greeting detection, help, test, Add More functionality preserved
 
 ### 🔧 ALL PREVIOUS ISSUES RESOLVED
+- **✅ FIXED**: Export button consistency - Both button clicks and commands work reliably (Aug 2024)
 - **✅ FIXED**: Railway URL redirects - All download links now use correct Vercel domain
 - **✅ FIXED**: Plain text parsing - NumMedia string vs number bug resolved
 - **✅ FIXED**: Template buttons - Export/Download interactive buttons working
@@ -117,6 +125,7 @@ DOWNLOAD_TEMPLATE_SID=... (optional)
 5. Implement contact format validation
 
 ## 🔄 Recent Development History
+- **Aug 14**: Fixed export button consistency bug - multiple button clicks now work
 - **Jul 31**: Fixed critical NumMedia type bug - plain text now working
 - **Jul 30**: Migrated from Railway to Vercel successfully
 - **Jul 29**: Implemented session-store architecture
@@ -124,5 +133,5 @@ DOWNLOAD_TEMPLATE_SID=... (optional)
 - **Jul 27**: Enhanced multi-format contact parsing
 
 ---
-**Last Updated**: July 31, 2025 (Post NumMedia Bug Fix)
-**Status**: Production Ready with Minor UX Issues
+**Last Updated**: August 14, 2025 (Export Button Bug Fix)
+**Status**: Production Ready - All Major Bugs Resolved
