@@ -72,9 +72,9 @@ const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT ||
 const FILE_EXPIRY = 2 * 60 * 60 * 1000; // 2 hours
 
 // SCALE CONFIGURATION
-const MAX_CONTACTS_PER_BATCH = 250; // WhatsApp limit
+const MAX_CONTACTS_PER_BATCH = 500; // Increased for bulk processing
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB per file
-const PROCESSING_TIMEOUT = 25000; // 25 seconds (WhatsApp timeout is 30s)
+const PROCESSING_TIMEOUT = 45000; // 45 seconds (increased for large text processing)
 const CHUNK_SIZE = 50; // Process contacts in chunks
 const WHATSAPP_MEDIA_LIMIT = 10; // WhatsApp/Twilio limit per message
 const BATCH_TIMEOUT = 20 * 60; // 20 minutes batch timeout
@@ -237,7 +237,7 @@ function validateAndSanitizeTextInput(input) {
     }
     
     // Length limits to prevent DoS
-    const MAX_TEXT_LENGTH = 10000; // 10KB max text message
+    const MAX_TEXT_LENGTH = 50000; // 50KB max text message (increased for bulk contacts)
     if (input.length > MAX_TEXT_LENGTH) {
         console.log(`🚨 Text input too long: ${input.length} chars (max: ${MAX_TEXT_LENGTH})`);
         return null;
