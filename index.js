@@ -699,12 +699,16 @@ app.post('/webhook', async (req, res) => {
     const { Body, From, NumMedia, ButtonText, ButtonPayload } = req.body;
     const startTime = Date.now();
     
+    console.log('🔥🔥🔥 WEBHOOK HIT! 🔥🔥🔥', new Date().toISOString());
     console.log('📨 INCOMING TRANSMISSION:', new Date().toISOString());
     console.log('From:', From);
-    console.log('Message:', Body);
+    console.log('Message Body Length:', Body ? Body.length : 'NULL');
+    console.log('Message Preview:', Body ? Body.substring(0, 100) + '...' : 'NO BODY');
     console.log('Button Text:', ButtonText);
     console.log('Button Payload:', ButtonPayload);
     console.log('Attachments:', NumMedia);
+    console.log('Full Request Body Keys:', Object.keys(req.body));
+    console.log('Request Headers:', JSON.stringify(req.headers, null, 2));
     
     // Log all media info for debugging
     if (NumMedia > 0) {
