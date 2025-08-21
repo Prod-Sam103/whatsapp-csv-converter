@@ -1021,9 +1021,10 @@ _Ready for contact processing!_`);
         // preview command removed - feature deprecated
             
         } else if (Body && Body.trim() && (NumMedia === 0 || NumMedia === '0')) {
-            // PLAIN TEXT CONTACT EXTRACTION
+            // SMART BATCH CONTACT EXTRACTION WITH AUTO-SPLITTING
             console.log(`🌟 PLAIN TEXT BRANCH TRIGGERED for ${From}`);
-            console.log(`🌟 Body: "${Body.substring(0, 50)}..."`);
+            console.log(`🌟 Body length: ${Body.length} chars`);
+            console.log(`🌟 Body preview: "${Body.substring(0, 50)}..."`);
             console.log(`🌟 NumMedia: ${NumMedia}`);
             
             // SECURITY: Validate and sanitize input
@@ -1037,6 +1038,42 @@ _Ready for contact processing!_`);
             
             console.log(`📝 Plain text message received (${sanitizedBody.length} chars)`);
             console.log(`📝 Sanitized body preview: "${sanitizedBody.substring(0, 100)}..."`);
+            
+            // SMART BATCH HANDLING: Check if message is too large
+            const { splitContactList, isLikelyContinuation, generateSplitInstructions, generateBatchStatus, EFFECTIVE_LIMIT } = require('./src/contact-splitter');
+            
+            // Get existing contacts to check for continuation
+            const cleanPhone = From.replace('whatsapp:', '');
+            const existingContacts = await store.get(`contacts:${cleanPhone}`) || [];
+            const isPartOfBatch = isLikelyContinuation(sanitizedBody, existingContacts);
+            
+            console.log(`📝 Message length: ${sanitizedBody.length}, Limit: ${EFFECTIVE_LIMIT}`);
+            console.log(`📝 Existing contacts: ${existingContacts.length}`);
+            console.log(`📝 Likely continuation: ${isPartOfBatch}`);
+            
+            // Handle oversized messages with smart splitting
+            if (sanitizedBody.length > EFFECTIVE_LIMIT && !isPartOfBatch) {
+                console.log(`📦 Message too large (${sanitizedBody.length} chars), offering smart split`);
+                
+                const chunks = splitContactList(sanitizedBody);
+                const estimatedContacts = (sanitizedBody.match(/\+234\d{10}/g) || []).length;
+                
+                // Store split info for user session
+                await store.set(`split:${cleanPhone}`, {
+                    chunks: chunks,
+                    currentPart: 0,
+                    totalParts: chunks.length,
+                    estimatedTotal: estimatedContacts,
+                    created: Date.now()
+                }, 3600); // 1 hour expiry
+                
+                const instructions = generateSplitInstructions(chunks, estimatedContacts);
+                twiml.message(instructions);
+                
+                res.type('text/xml');
+                res.send(twiml.toString());
+                return;
+            }
             
             try {
                 // Use enhanced text parser to extract contacts from message
@@ -1059,52 +1096,72 @@ _Ready for contact processing!_`);
                 if (extractedContacts.length > 0) {
                     console.log(`📝 Contacts found, processing batch for ${From}`);
                     
-                    // Use session store to append contacts (handles batching automatically)
-                    const cleanPhone = From.replace('whatsapp:', '');
-                    console.log(`📝 Adding ${extractedContacts.length} contacts to batch for ${cleanPhone}`);
-                    
-                    console.log(`📝 About to call store.appendContacts with phone: ${cleanPhone}`);
-                    console.log(`📝 Contacts to append:`, extractedContacts);
-                    
+                    // Append contacts to batch
                     const totalCount = await store.appendContacts(cleanPhone, extractedContacts);
-                    console.log(`📝 store.appendContacts returned: ${totalCount}`);
                     console.log(`📝 Batch now contains ${totalCount} total contacts`);
                     
-                    // Verify contacts were saved
-                    const verification = await store.get(`contacts:${cleanPhone}`);
-                    console.log(`📝 Verification check: ${verification ? verification.length : 'null'} contacts found`);
+                    // Check if this is part of a guided split process
+                    const splitInfo = await store.get(`split:${cleanPhone}`);
                     
-                    // Send interactive template with buttons or fallback
-                    try {
-                        console.log('📝 About to call sendPlainTextContactTemplate...');
-                        await sendPlainTextContactTemplate(From, extractedContacts.length, extractedContacts, totalCount);
-                        console.log('📝 sendPlainTextContactTemplate completed successfully');
-                    } catch (templateError) {
-                        console.error('📝 Plain text template failed, using TwiML fallback:', templateError);
-                        console.error('📝 Template error stack:', templateError.stack);
+                    if (splitInfo) {
+                        // Update split progress
+                        splitInfo.currentPart++;
+                        await store.set(`split:${cleanPhone}`, splitInfo, 3600);
                         
-                        // Fallback to TwiML message
-                        let previewMessage = `📝 **Found ${extractedContacts.length} contact(s) in your message!**\n\n`;
+                        console.log(`📦 Split progress: ${splitInfo.currentPart}/${splitInfo.totalParts}`);
                         
-                        // Show up to 3 contacts in preview
-                        extractedContacts.slice(0, 3).forEach((contact, index) => {
-                            previewMessage += `${index + 1}. **${contact.name || 'Contact'}**\n`;
-                            if (contact.mobile) previewMessage += `   📱 ${contact.mobile}\n`;
-                            if (contact.email) previewMessage += `   📧 ${contact.email}\n`;
-                            previewMessage += `\n`;
-                        });
+                        // Generate batch status message
+                        const statusMessage = generateBatchStatus(
+                            splitInfo.currentPart, 
+                            splitInfo.totalParts, 
+                            extractedContacts.length, 
+                            totalCount
+                        );
                         
-                        if (extractedContacts.length > 3) {
-                            previewMessage += `... and ${extractedContacts.length - 3} more\n\n`;
+                        // If not complete, provide next chunk
+                        if (splitInfo.currentPart < splitInfo.totalParts) {
+                            const nextChunk = splitInfo.chunks[splitInfo.currentPart];
+                            const finalMessage = `${statusMessage}\n\n**Part ${splitInfo.currentPart + 1} of ${splitInfo.totalParts}:**\n${nextChunk}`;
+                            twiml.message(finalMessage);
+                        } else {
+                            // All parts complete, clean up split session
+                            await store.del(`split:${cleanPhone}`);
+                            twiml.message(statusMessage);
                         }
                         
-                        previewMessage += `💾 **Total in batch: ${totalCount} contacts**\n\n`;
-                        previewMessage += `**Options:**\n`;
-                        previewMessage += `📤 Type "export" to download CSV\n`;
-                        previewMessage += `➕ Send more contacts to add them\n`;
-                        previewMessage += `👁️ Type "preview" to see all contacts`;
-                        
-                        twiml.message(previewMessage);
+                    } else {
+                        // Regular processing (not part of split)
+                        try {
+                            console.log('📝 About to call sendPlainTextContactTemplate...');
+                            await sendPlainTextContactTemplate(From, extractedContacts.length, extractedContacts, totalCount);
+                            console.log('📝 sendPlainTextContactTemplate completed successfully');
+                        } catch (templateError) {
+                            console.error('📝 Plain text template failed, using TwiML fallback:', templateError);
+                            console.error('📝 Template error stack:', templateError.stack);
+                            
+                            // Fallback to TwiML message
+                            let previewMessage = `📝 **Found ${extractedContacts.length} contact(s) in your message!**\n\n`;
+                            
+                            // Show up to 3 contacts in preview
+                            extractedContacts.slice(0, 3).forEach((contact, index) => {
+                                previewMessage += `${index + 1}. **${contact.name || 'Contact'}**\n`;
+                                if (contact.mobile) previewMessage += `   📱 ${contact.mobile}\n`;
+                                if (contact.email) previewMessage += `   📧 ${contact.email}\n`;
+                                previewMessage += `\n`;
+                            });
+                            
+                            if (extractedContacts.length > 3) {
+                                previewMessage += `... and ${extractedContacts.length - 3} more\n\n`;
+                            }
+                            
+                            previewMessage += `💾 **Total in batch: ${totalCount} contacts**\n\n`;
+                            previewMessage += `**Options:**\n`;
+                            previewMessage += `📤 Type "export" to download CSV\n`;
+                            previewMessage += `➕ Send more contacts to add them\n`;
+                            previewMessage += `👁️ Type "preview" to see all contacts`;
+                            
+                            twiml.message(previewMessage);
+                        }
                     }
                     
                 } else {

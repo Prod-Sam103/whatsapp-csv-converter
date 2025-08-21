@@ -87,7 +87,7 @@ STATUS_TEMPLATE_SID=... (optional)
 DOWNLOAD_TEMPLATE_SID=... (optional)
 ```
 
-### Vercel Config
+### Vercel Config (CRITICAL - DO NOT DELETE)
 ```json
 {
   "version": 2,
@@ -95,6 +95,9 @@ DOWNLOAD_TEMPLATE_SID=... (optional)
   "routes": [{"src": "/(.*)", "dest": "/index.js"}]
 }
 ```
+
+**⚠️ IMPORTANT**: `vercel.json` is REQUIRED for webhook functionality. 
+Without it, all routes return 404 and WhatsApp integration breaks completely.
 
 ## 🧪 Testing Workflow
 
