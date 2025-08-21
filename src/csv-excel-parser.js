@@ -125,50 +125,80 @@ function parseTextContacts(textContent) {
         }
         log(`📝 Method 1 found: ${contacts.length} contacts`);
         
-        // Method 2: Line-by-line analysis if no blocks found
+        // Method 2: Optimized parsing for "Name +phone" format (your exact format)
         if (contacts.length === 0) {
-            log('📝 Method 2: Line-by-line analysis...');
-            const lines = textContent.split(/[\n\r]+/).filter(line => line.trim().length > 3);
-            log(`📝 Analyzing ${lines.length} lines`);
+            log('📝 Method 2: Optimized parsing for Name +phone format...');
             
-            for (const line of lines) {
-                const emailMatch = line.match(emailPattern);
-                const phoneMatch = line.match(phonePattern);
+            // Split on common patterns for your format: "Name +234... Name2 +234..."
+            const namePhonePattern = /([A-Za-z\s&\.]+?)\s+(\+234\d{10})/g;
+            let match;
+            let parseCount = 0;
+            
+            while ((match = namePhonePattern.exec(textContent)) !== null && parseCount < 1000) {
+                const name = match[1].trim().replace(/^(Mr|Mrs|Miss|Dr|Prof)\.?\s*/i, '').trim();
+                const phone = match[2];
                 
-                if (emailMatch || phoneMatch) {
-                    // Extract name from line
-                    let name = line
-                        .replace(emailPattern, '')
-                        .replace(phonePattern, '')
-                        .replace(/[^\w\s]/g, ' ')
-                        .trim();
-                    
-                    // Clean up name
-                    const nameWords = name.split(/\s+/).filter(word => 
-                        word.length > 1 && 
-                        /^[A-Za-z]/.test(word) && 
-                        !['phone', 'email', 'contact', 'mobile', 'tel', 'call', 'mail'].includes(word.toLowerCase())
-                    );
-                    
-                    if (nameWords.length > 0) {
-                        name = nameWords.slice(0, 3).join(' '); // Max 3 words for name
-                    } else {
-                        name = 'Contact';
-                    }
-                    
+                if (name && phone) {
                     const contact = {
                         name: name,
-                        mobile: phoneMatch ? cleanPhoneNumber(phoneMatch[0]) : '',
-                        email: emailMatch ? emailMatch[0] : '',
+                        mobile: cleanPhoneNumber(phone),
+                        email: '',
                         passes: 1
                     };
                     
-                    if (contact.mobile || contact.email) {
+                    if (contact.name && contact.mobile) {
                         contacts.push(contact);
+                        parseCount++;
                     }
                 }
             }
-            log(`📝 Method 2 found: ${contacts.length} contacts`);
+            log(`📝 Method 2 found: ${contacts.length} contacts using optimized parsing`);
+            
+            // Fallback to line analysis if optimized parsing fails
+            if (contacts.length === 0) {
+                log('📝 Method 2b: Fallback line-by-line analysis...');
+                const lines = textContent.split(/[\n\r]+/).filter(line => line.trim().length > 3);
+                log(`📝 Analyzing ${lines.length} lines`);
+                
+                for (const line of lines) {
+                    const emailMatch = line.match(emailPattern);
+                    const phoneMatch = line.match(phonePattern);
+                    
+                    if (emailMatch || phoneMatch) {
+                        // Extract name from line
+                        let name = line
+                            .replace(emailPattern, '')
+                            .replace(phonePattern, '')
+                            .replace(/[^\w\s]/g, ' ')
+                            .trim();
+                        
+                        // Clean up name
+                        const nameWords = name.split(/\s+/).filter(word => 
+                            word.length > 1 && 
+                            /^[A-Za-z]/.test(word) && 
+                            !['phone', 'email', 'contact', 'mobile', 'tel', 'call', 'mail'].includes(word.toLowerCase())
+                        );
+                        
+                        if (nameWords.length > 0) {
+                            name = nameWords.slice(0, 3).join(' '); // Max 3 words for name
+                        } else {
+                            name = 'Contact';
+                        }
+                        
+                        const contact = {
+                            name: name,
+                            mobile: phoneMatch ? cleanPhoneNumber(phoneMatch[0]) : '',
+                            email: emailMatch ? emailMatch[0] : '',
+                            passes: 1
+                        };
+                        
+                        if (contact.mobile || contact.email) {
+                            contacts.push(contact);
+                        }
+                    }
+                }
+                log(`📝 Method 2b found: ${contacts.length} contacts`);
+            }
         }
         
         // Method 3: Extract all patterns and try to match them intelligently

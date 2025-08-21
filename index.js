@@ -1038,8 +1038,16 @@ _Ready for contact processing!_`);
                 // Use enhanced text parser to extract contacts from message
                 const { parseContactFile } = require('./src/csv-excel-parser');
                 console.log(`📝 About to call parseContactFile with text/plain type`);
+                console.log(`📝 Text input length: ${sanitizedBody.length} characters`);
+                console.log(`📝 Text preview (first 200 chars): ${sanitizedBody.substring(0, 200)}`);
                 
-                const extractedContacts = await parseContactFile(sanitizedBody, 'text/plain');
+                // Add timeout protection for large text processing
+                const parsePromise = parseContactFile(sanitizedBody, 'text/plain');
+                const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Text parsing timeout after 30 seconds')), 30000)
+                );
+                
+                const extractedContacts = await Promise.race([parsePromise, timeoutPromise]);
                 
                 console.log(`📝 parseContactFile completed successfully`);
                 console.log(`📝 Extracted ${extractedContacts.length} contacts from plain text`);
@@ -1096,8 +1104,11 @@ _Ready for contact processing!_`);
                     }
                     
                 } else {
-                    // No contacts found, but be helpful
-                    twiml.message(`📝 **No contacts detected in your message.**\n\n**Examples of supported formats:**\n• John Doe +2348123456789 john@example.com\n• Jane Smith: 08012345678\n• Bob Wilson - +44 20 7946 0958 bob@company.com\n\n**Or send VCF files directly!**\n\nType "help" for more info.`);
+                    // No contacts found, provide specific help for the user's format
+                    console.log(`📝 No contacts parsed from ${sanitizedBody.length} character message`);
+                    console.log(`📝 First 300 chars of failed message: ${sanitizedBody.substring(0, 300)}`);
+                    
+                    twiml.message(`📝 **I couldn't find any contacts in your ${sanitizedBody.length} character message.**\n\n**Your format looks like:** Name +234... Name +234...\n\n**I'm optimized for:**\n• Mr John Doe +2348123456789\n• Mrs Jane Smith +2347098765432\n• Contact Name +234XXXXXXXXXX\n\n**Try:**\n1. Add spaces between names and phones\n2. Use proper +234 format\n3. Send smaller batches (50-100 contacts)\n\nType "help" for more examples.`);
                 }
                 
             } catch (textError) {
