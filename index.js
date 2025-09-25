@@ -544,7 +544,7 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
     // Initialize Twilio client
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
     
-    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || '+14155238886';
+    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || '+16467578772';
     
     // Build contact preview for {{2}} variable
     const firstContact = contacts[0];
@@ -583,7 +583,7 @@ async function sendPlainTextContactTemplate(to, contactCount, contacts, totalCou
 // Template 1: Status Message with Export Button
 async function sendStatusTemplateWithExportButton(to, batch) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || '+14155238886';
+    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || '+16467578772';
     const remaining = MAX_CONTACTS_PER_BATCH - batch.count;
     
     console.log(`🚀 Sending status template with Export button - Count: ${batch.count}, Files: ${batch.filesProcessed}, Remaining: ${remaining}`);
@@ -644,7 +644,7 @@ async function sendStatusTemplateWithExportButton(to, batch) {
 // Template 2: Download CSV Button
 async function sendDownloadTemplateMessage(to, contactCount, fileId) {
     const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || '+14155238886';
+    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER || '+16467578772';
     
     const cleanFileId = typeof fileId === 'string' ? fileId.split('/').pop() : fileId;
     console.log(`🚀 Sending download template - FileID: ${cleanFileId}, Count: ${contactCount}`);
