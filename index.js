@@ -1062,6 +1062,8 @@ _Ready for contact processing!_`);
                                     sanitizedBody.includes('+234'); // Contains Nigerian contacts
 
             console.log(`📝 Truncation Analysis - Length: ${sanitizedBody.length}, Contacts: ${contactCount}, Likely truncated: ${isLikelyTruncated}`);
+            console.log(`📝 Message ends with: "${sanitizedBody.slice(-50)}"`);
+            console.log(`📝 Threshold: ${LIKELY_TRUNCATED_THRESHOLD}, isPartOfBatch: ${isPartOfBatch}`);
 
             if (isLikelyTruncated && !isPartOfBatch) {
                 console.log(`📦 Message too large (${sanitizedBody.length} chars), offering smart split`);
@@ -1142,6 +1144,36 @@ _Ready for contact processing!_`);
                         
                     } else {
                         // Regular processing (not part of split)
+
+                        // 🚨 PROACTIVE TRUNCATION CHECK - Ask if user has more contacts for large batches
+                        const suspiciouslyLargeText = sanitizedBody.length > 1000;
+                        const substantialContactBatch = extractedContacts.length >= 10;
+                        const shouldAskForMore = suspiciouslyLargeText && substantialContactBatch;
+
+                        console.log(`🔍 Proactive Check - TextLength: ${sanitizedBody.length}, Contacts: ${extractedContacts.length}, ShouldAsk: ${shouldAskForMore}`);
+
+                        if (shouldAskForMore) {
+                            // Send truncation warning instead of normal template
+                            const truncationMessage = `⚠️ **Potential WhatsApp Truncation Detected!**
+
+**Found:** ${extractedContacts.length} contacts from your message
+**Suspicion:** Your message was ${sanitizedBody.length} characters - likely truncated by WhatsApp's 1600 char limit
+
+**🤔 Question: Do you have MORE contacts that got cut off?**
+
+**Options:**
+✅ **Export current batch** (${totalCount} contacts total)
+➕ **Add more contacts** in smaller chunks (10-15 per message)
+📱 **Upload VCF file** instead for large lists
+
+Type "export" or use buttons below!`;
+
+                            twiml.message(truncationMessage);
+                            res.type('text/xml');
+                            res.send(twiml.toString());
+                            return;
+                        }
+
                         try {
                             console.log('📝 About to call sendPlainTextContactTemplate...');
                             await sendPlainTextContactTemplate(From, extractedContacts.length, extractedContacts, totalCount);
