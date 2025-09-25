@@ -1052,7 +1052,16 @@ _Ready for contact processing!_`);
             console.log(`📝 Likely continuation: ${isPartOfBatch}`);
             
             // Handle oversized messages with smart splitting
-            if (sanitizedBody.length > EFFECTIVE_LIMIT && !isPartOfBatch) {
+            // Use lower threshold to detect truncated messages from WhatsApp/Twilio
+            const TRUNCATION_DETECTION_THRESHOLD = 1300; // Detect truncated messages
+
+            // Additional check: detect if message appears truncated (ends abruptly mid-contact)
+            const appearsTooBig = sanitizedBody.length > TRUNCATION_DETECTION_THRESHOLD;
+            const endsAbruptly = sanitizedBody.length > 1000 && !sanitizedBody.trim().match(/\s+$/) &&
+                               !sanitizedBody.trim().match(/\d{10}\s*$/) && // doesn't end with complete phone
+                               sanitizedBody.includes('+234'); // contains Nigerian contacts
+
+            if ((appearsTooBig || endsAbruptly) && !isPartOfBatch) {
                 console.log(`📦 Message too large (${sanitizedBody.length} chars), offering smart split`);
                 
                 const chunks = splitContactList(sanitizedBody);
