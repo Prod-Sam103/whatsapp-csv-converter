@@ -124,18 +124,18 @@ function simpleSplit(text) {
  * @returns {string}
  */
 function generateSplitInstructions(chunks, totalEstimatedContacts) {
-    return `📋 **Your contact list was too large - WhatsApp truncated it!**
+    return `⚠️ **Large Contact List Detected - WhatsApp Truncated Your Message!**
 
-⚠️ **What happened:** WhatsApp has a 1600 character limit, so your message was cut off mid-way.
+**What I found:** ${totalEstimatedContacts} contacts from the portion WhatsApp delivered
 
-🔢 **From truncated portion:** Found ${totalEstimatedContacts} contacts
-📝 **What to do:** Please send your contacts in smaller chunks (about 10-15 contacts per message)
+**📏 The Issue:** WhatsApp limits messages to 1600 characters. Your contact list was much larger, so it got cut off.
 
-**💡 Tip:** Copy and paste smaller sections of your contact list, then use "Add More" to build your batch.
+**🔄 Simple Solution:**
+1. **Export what I have** using the button below (${totalEstimatedContacts} contacts)
+2. **OR add more contacts** in smaller chunks (10-15 contacts per message)
+3. Use "Add More" button to keep building your batch
 
-✅ I'll automatically combine all your messages into one CSV file!
-
-**Current batch:** ${totalEstimatedContacts} contacts ready for export.`;
+**💡 Pro Tip:** Break your contact list into smaller sections and send them one by one. I'll combine everything into one CSV file!`;
 }
 
 /**

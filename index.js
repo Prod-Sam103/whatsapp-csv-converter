@@ -1051,17 +1051,19 @@ _Ready for contact processing!_`);
             console.log(`📝 Existing contacts: ${existingContacts.length}`);
             console.log(`📝 Likely continuation: ${isPartOfBatch}`);
             
-            // Handle oversized messages with smart splitting
-            // Use lower threshold to detect truncated messages from WhatsApp/Twilio
-            const TRUNCATION_DETECTION_THRESHOLD = 1300; // Detect truncated messages
+            // Handle oversized messages with smart splitting - detect WhatsApp/Twilio truncation
+            // WhatsApp truncates messages at ~1600 chars, so messages close to this are likely truncated
+            const LIKELY_TRUNCATED_THRESHOLD = 1200; // Conservative threshold for detection
+            const contactCount = (sanitizedBody.match(/\+234\d{10}/g) || []).length;
 
-            // Additional check: detect if message appears truncated (ends abruptly mid-contact)
-            const appearsTooBig = sanitizedBody.length > TRUNCATION_DETECTION_THRESHOLD;
-            const endsAbruptly = sanitizedBody.length > 1000 && !sanitizedBody.trim().match(/\s+$/) &&
-                               !sanitizedBody.trim().match(/\d{10}\s*$/) && // doesn't end with complete phone
-                               sanitizedBody.includes('+234'); // contains Nigerian contacts
+            // Check if message appears to be truncated
+            const isLikelyTruncated = sanitizedBody.length > LIKELY_TRUNCATED_THRESHOLD &&
+                                    contactCount >= 10 && // Has many contacts (suggests large list)
+                                    sanitizedBody.includes('+234'); // Contains Nigerian contacts
 
-            if ((appearsTooBig || endsAbruptly) && !isPartOfBatch) {
+            console.log(`📝 Truncation Analysis - Length: ${sanitizedBody.length}, Contacts: ${contactCount}, Likely truncated: ${isLikelyTruncated}`);
+
+            if (isLikelyTruncated && !isPartOfBatch) {
                 console.log(`📦 Message too large (${sanitizedBody.length} chars), offering smart split`);
                 
                 const chunks = splitContactList(sanitizedBody);
