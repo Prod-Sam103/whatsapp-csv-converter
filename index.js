@@ -1162,21 +1162,27 @@ _Ready for contact processing!_`);
 
                         console.log(`🔍 Proactive Check - TextLength: ${sanitizedBody.length}, Contacts: ${extractedContacts.length}, ShouldAsk: ${shouldAskForMore}`);
 
-                        if (shouldAskForMore) {
+                        // Also check if user seems to be sending large contact lists manually
+                        const likelyManualEntry = extractedContacts.length >= 8 && sanitizedBody.includes('Mr') && sanitizedBody.includes('Mrs');
+
+                        if (shouldAskForMore || likelyManualEntry) {
                             // Send truncation warning instead of normal template
-                            const truncationMessage = `⚠️ **Potential WhatsApp Truncation Detected!**
+                            const truncationMessage = `📋 **Large Contact List Detected!**
 
-**Found:** ${extractedContacts.length} contacts from your message
-**Suspicion:** Your message was ${sanitizedBody.length} characters - likely truncated by WhatsApp's 1600 char limit
+**✅ Found:** ${extractedContacts.length} contacts from your message
 
-**🤔 Question: Do you have MORE contacts that got cut off?**
+**⚠️ WhatsApp Limitation:** Messages over ~1400 characters get dropped completely by WhatsApp/Twilio - we never receive them!
 
-**Options:**
-✅ **Export current batch** (${totalCount} contacts total)
-➕ **Add more contacts** in smaller chunks (10-15 per message)
-📱 **Upload VCF file** instead for large lists
+**📱 Best Solution for Large Lists:**
+1. **Export VCF from your phone**: Settings → Contacts → Export → Share VCF file
+2. **Upload the VCF file** to this chat
+3. **Get perfect CSV** with all contacts intact
 
-Type "export" or use buttons below!`;
+**Alternative Options:**
+✅ **Export current batch** (${totalCount} contacts)
+➕ **Add more contacts** in small chunks (8-10 per message)
+
+💡 **VCF files work best for large contact lists!**`;
 
                             twiml.message(truncationMessage);
                             res.type('text/xml');
