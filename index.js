@@ -709,6 +709,16 @@ app.post('/webhook', async (req, res) => {
     console.log('Attachments:', NumMedia);
     console.log('Full Request Body Keys:', Object.keys(req.body));
     console.log('Request Headers:', JSON.stringify(req.headers, null, 2));
+
+    // 🚨 ENHANCED DEBUG LOGGING - Capture everything about large messages
+    if (Body && Body.length > 500) {
+        console.log('🚨🚨🚨 LARGE MESSAGE DETECTED 🚨🚨🚨');
+        console.log('📏 Large message length:', Body.length);
+        console.log('📝 Large message starts with:', Body.substring(0, 200));
+        console.log('📝 Large message ends with:', Body.substring(Body.length - 200));
+        console.log('📊 Nigerian phone count:', (Body.match(/\+234\d{10}/g) || []).length);
+        console.log('🔍 Contains contacts pattern:', /Mr|Mrs|Miss|Dr|Prof/.test(Body));
+    }
     
     // Log all media info for debugging
     if (NumMedia > 0) {
